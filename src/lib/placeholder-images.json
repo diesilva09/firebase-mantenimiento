@@ -1,0 +1,40 @@
+{
+  "placeholderImages": [
+    {
+      "id": "user-1",
+      "description": "Carlos Ramirez avatar",
+      "imageUrl": "https://images.unsplash.com/photo-1624395213043-fa2e123b2656?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw3fHxtYW4lMjBwb3J0cmFpdHxlbnwwfHx8fDE3NjMzNzc5Mjh8MA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "man portrait"
+    },
+    {
+      "id": "user-2",
+      "description": "Ana Rodriguez avatar",
+      "imageUrl": "https://images.unsplash.com/photo-1546961329-78bef0414d7c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw5fHx3b21hbiUyMHBvcnRyYWl0fGVufDB8fHx8MTc2MzQ0NDY2Mnww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "woman portrait"
+    },
+    {
+      "id": "user-3",
+      "description": "Luis Garcia avatar",
+      "imageUrl": "https://images.unsplash.com/photo-1540569014015-19a7be504e3a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHwyfHxwZXJzb24lMjBwb3J0cmFpdHxlbnwwfHx8fDE3NjM0NzE1OTl8MA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "person portrait"
+    },
+    {
+      "id": "user-4",
+      "description": "Sofia Martinez avatar",
+      "imageUrl": "https://images.unsplash.com/photo-1618938700817-fe48bd93f20b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHwxfHxzbWlsaW5nJTIwd29tYW58ZW58MHx8fHwxNzYzNDcwODE4fDA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "smiling woman"
+    },
+    {
+      "id": "user-5",
+      "description": "Javier Hernandez avatar",
+      "imageUrl": "https://images.unsplash.com/photo-1687092084146-a2893f0b896a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw4fHxtYW4lMjBnbGFzc2VzfGVufDB8fHx8MTc2MzQ3NjIzNXww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "man glasses"
+    },
+    {
+      "id": "default-user",
+      "description": "Default user avatar",
+      "imageUrl": "https://images.unsplash.com/photo-1620121684840-edffcfc4b878?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw5fHxhYnN0cmFjdCUyMHNoYXBlfGVufDB8fHx8MTc2MzQ4NDg1OHww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "abstract shape"
+    }
+  ]
+}
