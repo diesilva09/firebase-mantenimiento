@@ -47,44 +47,54 @@ export function StopOperationsForm() {
     },
   })
 
-  type EquipmentLookup = { codigo: string; nombre: string }
+  type EquipmentLookup = { codigo: string; nombre: string; area?: string | null; linea?: string | null }
 
   const [equipos, setEquipos] = useState<EquipmentLookup[]>([])
   const [maquinaQuery, setMaquinaQuery] = useState("")
   const [showMaquinaSuggestions, setShowMaquinaSuggestions] = useState(false)
 
   useEffect(() => {
-  const fetchEquipos = async () => {
-    try {
-      const response = await fetch('/api/equipos');
-      const data = await response.json();
-      const equiposData = data.data || [];
-      
-      const mapped: EquipmentLookup[] = equiposData
-        .filter((e: any) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
-        .map((e: any) => ({ codigo: e.codigo, nombre: e.nombre }));
-      
-      setEquipos(mapped);
-    } catch (e) {
-      console.warn("No se pudo cargar la lista de equipos desde la API", e);
-      
-      // Fallback a localStorage si la API falla
+    const fetchEquipos = async () => {
       try {
-        const raw = typeof window !== "undefined" ? localStorage.getItem("equipos") : null;
-        if (!raw) return;
-        const parsed = JSON.parse(raw) as any[];
-        const mapped: EquipmentLookup[] = parsed
-          .filter((e) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
-          .map((e) => ({ codigo: e.codigo, nombre: e.nombre }));
-        setEquipos(mapped);
-      } catch (localError) {
-        console.warn("Fallback a localStorage también falló", localError);
-      }
-    }
-  };
+        const response = await fetch('/api/equipos');
+        const data = await response.json();
+        const equiposData = data.data || [];
 
-  fetchEquipos();
-}, []);
+        const mapped: EquipmentLookup[] = equiposData
+          .filter((e: any) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
+          .map((e: any) => ({
+            codigo: e.codigo,
+            nombre: e.nombre,
+            area: e.area ?? null,
+            linea: e.linea ?? null,
+          }));
+
+        setEquipos(mapped);
+      } catch (e) {
+        console.warn("No se pudo cargar la lista de equipos desde la API", e);
+
+        // Fallback a localStorage si la API falla
+        try {
+          const raw = typeof window !== "undefined" ? localStorage.getItem("equipos") : null;
+          if (!raw) return;
+          const parsed = JSON.parse(raw) as any[];
+          const mapped: EquipmentLookup[] = parsed
+            .filter((e) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
+            .map((e) => ({
+              codigo: e.codigo,
+              nombre: e.nombre,
+              area: e.area ?? null,
+              linea: e.linea ?? null,
+            }));
+          setEquipos(mapped);
+        } catch (localError) {
+          console.warn("Fallback a localStorage también falló", localError);
+        }
+      }
+    };
+
+    fetchEquipos();
+  }, []);
   const filteredEquipos = useMemo(() => {
     const q = maquinaQuery.trim().toLowerCase()
     if (!q) return []
@@ -200,10 +210,12 @@ export function StopOperationsForm() {
                     <button
                       type="button"
                       key={e.codigo}
-                      className="flex w-full items-start gap-2 px-2 py-1.5 text-left hover:bg-accent"
+                      className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
                       onMouseDown={(ev) => {
                         ev.preventDefault()
-                        const label = `${e.codigo} - ${e.nombre}`
+                        const areaText = e.area ?? "Sin área";
+                        const lineaText = e.linea ?? "Sin línea";
+                        const label = `${e.codigo} - ${areaText}${e.linea ? ` - ${lineaText}` : ""} - ${e.nombre}`;
                         setMaquinaQuery(label)
                         field.onChange(label)
                         form.setValue("codigoEquipo", e.codigo)
@@ -211,7 +223,11 @@ export function StopOperationsForm() {
                       }}
                     >
                       <span className="font-medium">{e.codigo}</span>
-                      <span className="text-[11px] text-muted-foreground">{e.nombre}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {e.area ?? "Sin área"}
+                        {e.linea ? ` • ${e.linea}` : ""}
+                        {` • ${e.nombre}`}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -292,7 +308,27 @@ export function StopOperationsForm() {
                     <FormItem>
                     <FormLabel>Duración (minutos)</FormLabel>
                     <FormControl>
-                        <Input type="number" placeholder="Ej: 30" {...field} onChange={e => field.onChange(parseInt(e.target.value, 10) || 0)} />
+                      <Input
+                        type="number"
+                        placeholder="Ej: 30"
+                        value={field.value === undefined || field.value === null ? "" : field.value}
+                        onChange={(e) => {
+                          const v = e.target.value
+
+                          // Permitir campo vacío sin forzar 0 mientras el usuario escribe
+                          if (v === "") {
+                            field.onChange("")
+                            return
+                          }
+
+                          const num = parseInt(v, 10)
+                          if (Number.isNaN(num)) {
+                            field.onChange("")
+                          } else {
+                            field.onChange(num)
+                          }
+                        }}
+                      />
                     </FormControl>
                     <FormMessage />
                     </FormItem>

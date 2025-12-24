@@ -1,3 +1,5 @@
+"use client"
+
 import { Suspense } from 'react'
 import TasksPageClient from './_components/tasks-page-client'
 
@@ -8,14 +10,6 @@ const users = [
   { id: '3', name: 'Carlos López', avatarUrl: 'https://picsum.photos/seed/carlos/40/40' },
   { id: '4', name: 'Ana Rodríguez', avatarUrl: 'https://picsum.photos/seed/ana/40/40' },
 ]
-
-// Componente para cargar la página de tareas
-// Dejamos que el cliente obtenga siempre las tareas desde la API
-// filtradas por userEmail; aquí solo pasamos usuarios y un arreglo vacío.
-async function TasksLoader() {
-	const initialTasks: any[] = []
-	return <TasksPageClient initialTasks={initialTasks} users={users} />
-}
 
 // Loading component
 function TasksLoading() {
@@ -32,9 +26,10 @@ function TasksLoading() {
 }
 
 export default function TasksPage() {
+  const initialTasks: any[] = []
   return (
     <Suspense fallback={<TasksLoading />}>
-      <TasksLoader />
+      <TasksPageClient initialTasks={initialTasks} users={users} />
     </Suspense>
   )
 }

@@ -119,7 +119,7 @@ export const forms: FormMetadata[] = [
     
     { slug: 'solicitud-repuestos', title: 'Solicitud de Repuestos', description: 'Sistema para solicitar y gestionar repuestos necesarios.' },
     
-    { slug: 'minuta-mtto', title: 'Minuta MTTO 2025', description: 'Actas de reunión del equipo de mantenimiento.' },
+    { slug: 'minuta-mtto', title: 'Minuta MTTO 2026', description: 'Actas de reunión del equipo de mantenimiento.' },
 ];
 
 const getFormTitle = (slug: FormSlug) => forms.find(f => f.slug === slug)?.title || 'Formulario';

@@ -40,18 +40,49 @@ export default function EquipoDetallePage() {
   const searchParams = useSearchParams()
   const view = (searchParams.get("view") || "hoja-vida") as "hoja-vida" | "paradas" | "repuestos" | "anexos"
 
-  const attachmentsUrl = useMemo(() => {
-    if (typeof window === "undefined") return ""
-    try {
-      const raw = localStorage.getItem("equipos")
-      if (!raw) return ""
-      const all = JSON.parse(raw) as any[]
-      const eq = all.find((e) => e && e.codigo === codigo)
-      return eq?.attachmentsUrl ?? ""
-    } catch (e) {
-      console.warn("No se pudo leer equipos desde localStorage para anexos", e)
-      return ""
+  const [attachmentsUrl, setAttachmentsUrl] = useState<string>("")
+  const [loadingAttachments, setLoadingAttachments] = useState<boolean>(true)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const loadAttachmentsUrl = async () => {
+      setLoadingAttachments(true)
+      try {
+        // 1) Intentar leer desde localStorage (sinpegar siempre a la API)
+        try {
+          const raw = localStorage.getItem("equipos")
+          if (raw) {
+            const all = JSON.parse(raw) as any[]
+            const eq = all.find((e) => e && e.codigo === codigo)
+            if (eq?.attachmentsUrl) {
+              setAttachmentsUrl(eq.attachmentsUrl as string)
+              return
+            }
+          }
+        } catch (e) {
+          console.warn("No se pudo leer equipos desde localStorage para anexos", e)
+        }
+
+        // 2) Si no se encontró nada en localStorage, intentar leer directamente desde la API
+        try {
+          const res = await fetch("/api/equipos")
+          if (!res.ok) return
+          const json = await res.json()
+          const data: any[] = Array.isArray(json?.data) ? json.data : []
+          const row = data.find((r) => r && r.codigo === codigo)
+          if (row?.attachments_url) {
+            setAttachmentsUrl(row.attachments_url as string)
+          }
+        } catch (e) {
+          console.warn("No se pudo cargar attachments_url desde /api/equipos", e)
+        }
+      } finally {
+        setLoadingAttachments(false)
+      }
     }
+
+    loadAttachmentsUrl()
   }, [codigo])
 
  const [hojaVida, setHojaVida] = useState<HojaVidaRow[]>([])
@@ -100,6 +131,9 @@ useEffect(() => {
   fetchHojaVida()
 }, [codigo])
 
+  const [startDateFilterParadas, setStartDateFilterParadas] = useState<string>("")
+  const [endDateFilterParadas, setEndDateFilterParadas] = useState<string>("")
+
   const paradas = useMemo<ParadaRow[]>(() => {
     if (typeof window === "undefined") return []
     try {
@@ -121,6 +155,16 @@ useEffect(() => {
       return []
     }
   }, [codigo])
+
+  const filteredParadas = useMemo(() => {
+    return paradas.filter((row) => {
+      // Filtros por fecha (row.fecha está en formato yyyy-mm-dd)
+      if (startDateFilterParadas && row.fecha && row.fecha < startDateFilterParadas) return false
+      if (endDateFilterParadas && row.fecha && row.fecha > endDateFilterParadas) return false
+
+      return true
+    })
+  }, [paradas, startDateFilterParadas, endDateFilterParadas])
 
   const [expandedHojaVidaIndex, setExpandedHojaVidaIndex] = useState<number | null>(null)
   const [expandedParadaIndex, setExpandedParadaIndex] = useState<number | null>(null)
@@ -152,7 +196,7 @@ useEffect(() => {
           variant="ghost"
           size="sm"
           className="flex items-center gap-1 text-sm shrink-0"
-          onClick={() => router.push("/dashboard/equipos?view=list")}
+          onClick={() => router.push(`/dashboard/equipos?view=list&selectedCodigo=${encodeURIComponent(codigo)}`)}
         >
           <ArrowLeft className="h-4 w-4" />
           <span>Volver</span>
@@ -278,6 +322,28 @@ useEffect(() => {
       {view === "paradas" && (
         <div className="space-y-2">
           <h2 className="text-lg font-medium">Paradas operativas</h2>
+
+          <div className="flex flex-wrap gap-2 text-[11px] sm:text-xs">
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-medium text-muted-foreground">Desde</span>
+              <Input
+                type="date"
+                className="h-8 px-2 text-[11px]"
+                value={startDateFilterParadas}
+                onChange={(e) => setStartDateFilterParadas(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-medium text-muted-foreground">Hasta</span>
+              <Input
+                type="date"
+                className="h-8 px-2 text-[11px]"
+                value={endDateFilterParadas}
+                onChange={(e) => setEndDateFilterParadas(e.target.value)}
+              />
+            </div>
+          </div>
+
           <div className="overflow-x-auto rounded-md border bg-card">
             <table className="min-w-full text-xs">
               <thead className="bg-muted text-left">
@@ -298,8 +364,14 @@ useEffect(() => {
                       No hay paradas operativas registradas aún para este equipo.
                     </td>
                   </tr>
+                ) : filteredParadas.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">
+                      No hay paradas operativas que coincidan con los filtros seleccionados.
+                    </td>
+                  </tr>
                 ) : (
-                  paradas.map((row, idx) => (
+                  filteredParadas.map((row, idx) => (
                     <React.Fragment key={`po-${idx}`}>
                       <tr className="border-t">
                         <td className="px-3 py-2 align-top whitespace-nowrap">{row.fecha}</td>
@@ -359,7 +431,12 @@ useEffect(() => {
         <div className="space-y-2">
           <h2 className="text-lg font-medium">Anexos</h2>
           <div className="rounded-md border bg-card p-4 text-sm text-muted-foreground space-y-4">
-            {attachmentsUrl ? (
+            {loadingAttachments ? (
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 animate-spin rounded-full border border-current border-t-transparent"></div>
+                <span>Cargando carpeta...</span>
+              </div>
+            ) : attachmentsUrl ? (
               <button
                 type="button"
                 className="flex items-center gap-3 rounded-md border bg-background px-4 py-3 text-left hover:bg-accent/60"
@@ -398,6 +475,7 @@ interface Repuesto {
   nombre: string
   descripcion: string | null
   cantidad: number
+  precio: number | null
   ubicacion: string | null
   foto_url: string | null
 }
@@ -415,9 +493,12 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
   const [descripcion, setDescripcion] = useState("")
   const [cantidad, setCantidad] = useState<number | "">("")
   const [ubicacion, setUbicacion] = useState("")
+  const [precio, setPrecio] = useState<number | "">("")
   const [fotoFile, setFotoFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Repuesto | null>(null)
+  const [expandedRepuestoId, setExpandedRepuestoId] = useState<number | null>(null)
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchRepuestos = async () => {
@@ -428,7 +509,38 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
         if (!res.ok) throw new Error("Error cargando repuestos")
         const json = await res.json()
         const data = Array.isArray(json?.data) ? json.data : []
-        setRepuestos(data as Repuesto[])
+        // Asegurar que el precio se mapee correctamente
+        const mappedData = data.map((r: any) => {
+          // Debug: ver qué viene de la API
+          console.log('Repuesto desde API:', { id: r.id, nombre: r.nombre, precio_raw: r.precio, tipo_precio: typeof r.precio })
+          
+          // Procesar precio: puede venir como string, number, null, undefined, o "0"
+          // IMPORTANTE: 0 es un valor válido, no debe tratarse como null
+          let precioValue: number | null = null
+          
+          // Verificar si el precio existe (incluyendo 0 como valor válido)
+          if (r.precio !== null && r.precio !== undefined) {
+            // Si es string vacío, es null
+            if (r.precio === '') {
+              precioValue = null
+            } else {
+              // Convertir a número (puede ser string "0" o número 0)
+              if (typeof r.precio === 'string') {
+                const parsed = parseFloat(r.precio)
+                precioValue = isNaN(parsed) ? null : parsed
+              } else {
+                precioValue = Number(r.precio)
+              }
+            }
+          }
+          
+          console.log('Precio procesado:', precioValue, 'tipo:', typeof precioValue, 'es 0?', precioValue === 0)
+          return {
+            ...r,
+            precio: precioValue
+          }
+        })
+        setRepuestos(mappedData as Repuesto[])
       } catch (e) {
         console.warn("Error cargando repuestos", e)
         setError("No se pudieron cargar los repuestos de este equipo.")
@@ -455,6 +567,7 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
     setNombre("")
     setDescripcion("")
     setCantidad("")
+    setPrecio("")
     setUbicacion("")
     setFotoFile(null)
     setEditing(null)
@@ -475,11 +588,17 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
   }
 
   const openForEdit = (rep: Repuesto) => {
+    console.log('Abriendo para editar repuesto:', rep)
+    console.log('Precio del repuesto:', rep.precio, 'tipo:', typeof rep.precio)
     setEditing(rep)
     setCodigoRepuesto(rep.codigo_repuesto)
     setNombre(rep.nombre)
     setDescripcion(rep.descripcion || "")
     setCantidad(rep.cantidad)
+    // Manejar precio: si es null/undefined usar "", si es 0 o número usar el número
+    const precioValue = rep.precio === null || rep.precio === undefined ? "" : rep.precio
+    console.log('Precio establecido en formulario:', precioValue)
+    setPrecio(precioValue)
     setUbicacion(rep.ubicacion || "")
     setFotoFile(null)
     setOpen(true)
@@ -517,6 +636,7 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
         nombre: nombre.trim(),
         descripcion: descripcion.trim() || null,
         cantidad: typeof cantidad === "number" ? cantidad : 0,
+        precio: precio !== "" && precio !== null && precio !== undefined ? (typeof precio === "number" ? precio : Number(precio)) : null,
         ubicacion: ubicacion.trim() || null,
         fotoUrl,
       }
@@ -529,10 +649,30 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
       })
 
       if (!res.ok) throw new Error(isEdit ? "Error al actualizar el repuesto" : "Error al guardar el repuesto")
-      const saved = (await res.json()) as Repuesto
+      const saved = await res.json()
+      console.log('Respuesta del servidor después de guardar:', saved)
+      console.log('Precio en respuesta:', saved.precio, 'tipo:', typeof saved.precio)
+      
+      // Asegurar que el precio se mapee correctamente (incluyendo cuando es 0)
+      let precioMapped: number | null = null
+      if (saved.precio !== null && saved.precio !== undefined && saved.precio !== '') {
+        if (typeof saved.precio === 'string') {
+          const parsed = parseFloat(saved.precio)
+          precioMapped = isNaN(parsed) ? null : parsed
+        } else {
+          precioMapped = Number(saved.precio)
+        }
+      }
+      
+      console.log('Precio mapeado:', precioMapped)
+      
+      const savedMapped = {
+        ...saved,
+        precio: precioMapped
+      } as Repuesto
 
       setRepuestos(prev =>
-        isEdit ? prev.map(r => (r.id === saved.id ? saved : r)) : [saved, ...prev]
+        isEdit ? prev.map(r => (r.id === savedMapped.id ? savedMapped : r)) : [savedMapped, ...prev]
       )
 
       resetForm()
@@ -564,26 +704,29 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
               <DialogHeader>
                 <DialogTitle>{editing ? "Editar repuesto" : "Agregar repuesto"}</DialogTitle>
               </DialogHeader>
-              <div className="space-y-3 text-sm">
-                <div className="grid gap-2">
-                  <Label htmlFor="codigoRepuesto">Código repuesto</Label>
-                  <Input
-                    id="codigoRepuesto"
-                    placeholder="Código repuesto"
-                    value={codigoRepuesto}
-                    onChange={(e) => setCodigoRepuesto(e.target.value)}
-                  />
+              <div className="space-y-4 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="codigoRepuesto">Código repuesto</Label>
+                    <Input
+                      id="codigoRepuesto"
+                      placeholder="Código repuesto"
+                      value={codigoRepuesto}
+                      onChange={(e) => setCodigoRepuesto(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="nombreRepuesto">Nombre</Label>
+                    <Input
+                      id="nombreRepuesto"
+                      placeholder="Nombre"
+                      value={nombre}
+                      onChange={(e) => setNombre(e.target.value)}
+                    />
+                  </div>
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="nombreRepuesto">Nombre</Label>
-                  <Input
-                    id="nombreRepuesto"
-                    placeholder="Nombre"
-                    value={nombre}
-                    onChange={(e) => setNombre(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-2">
+
+                <div className="space-y-2">
                   <Label htmlFor="descripcionRepuesto">Descripción</Label>
                   <Input
                     id="descripcionRepuesto"
@@ -592,39 +735,59 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
                     onChange={(e) => setDescripcion(e.target.value)}
                   />
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="cantidadRepuesto">Cantidad</Label>
-                  <Input
-                    id="cantidadRepuesto"
-                    type="number"
-                    placeholder="Cantidad"
-                    value={cantidad}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      setCantidad(v === "" ? "" : Number(v))
-                    }}
-                  />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="cantidadRepuesto">Cantidad</Label>
+                    <Input
+                      id="cantidadRepuesto"
+                      type="number"
+                      placeholder="Cantidad"
+                      value={cantidad}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setCantidad(v === "" ? "" : Number(v))
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="precioRepuesto">Precio</Label>
+                    <Input
+                      id="precioRepuesto"
+                      type="number"
+                      step="0.01"
+                      placeholder="Precio"
+                      value={precio}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setPrecio(v === "" ? "" : Number(v))
+                      }}
+                    />
+                  </div>
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="ubicacionRepuesto">Ubicación</Label>
-                  <Input
-                    id="ubicacionRepuesto"
-                    placeholder="Ubicación"
-                    value={ubicacion}
-                    onChange={(e) => setUbicacion(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="fotoRepuesto">Imagen del repuesto</Label>
-                  <Input
-                    id="fotoRepuesto"
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] ?? null
-                      setFotoFile(file)
-                    }}
-                  />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="ubicacionRepuesto">Ubicación</Label>
+                    <Input
+                      id="ubicacionRepuesto"
+                      placeholder="Ubicación"
+                      value={ubicacion}
+                      onChange={(e) => setUbicacion(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="fotoRepuesto">Imagen del repuesto</Label>
+                    <Input
+                      id="fotoRepuesto"
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null
+                        setFotoFile(file)
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
               <DialogFooter className="mt-4">
@@ -667,56 +830,150 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
                 <th className="px-3 py-2 font-semibold">Nombre</th>
                 <th className="px-3 py-2 font-semibold">Descripción</th>
                 <th className="px-3 py-2 font-semibold">Cantidad</th>
+                <th className="px-3 py-2 font-semibold">Precio</th>
                 <th className="px-3 py-2 font-semibold">Ubicación</th>
+                <th className="px-3 py-2 font-semibold text-right">Ver</th>
                 {isAdmin && <th className="px-3 py-2 font-semibold text-right">Acciones</th>}
               </tr>
             </thead>
             <tbody>
               {repuestos.map((r) => (
-                <tr key={r.id} className="border-t">
-                  <td className="px-3 py-2 align-top">
-                    {r.foto_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={r.foto_url}
-                        alt={r.nombre}
-                        className="h-10 w-10 rounded-md object-cover border"
-                      />
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 align-top">{r.codigo_repuesto}</td>
-                  <td className="px-3 py-2 align-top">{r.nombre}</td>
-                  <td className="px-3 py-2 align-top max-w-xs whitespace-normal break-words">{r.descripcion || "-"}</td>
-                  <td className="px-3 py-2 align-top">{r.cantidad}</td>
-                  <td className="px-3 py-2 align-top">{r.ubicacion || "-"}</td>
-                  {isAdmin && (
+                <React.Fragment key={r.id}>
+                  <tr className="border-t">
                     <td className="px-3 py-2 align-top">
-                      <div className="flex justify-end">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-7 w-7">
-                              <span className="sr-only">Acciones</span>
-                              ⋮
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="text-xs">
-                            <DropdownMenuItem onClick={() => openForEdit(r)}>
-                              Editar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-red-600 focus:text-red-600"
-                              onClick={() => setDeleteTarget(r)}
-                            >
-                              Eliminar
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
+                      {r.foto_url ? (
+                        <button
+                          type="button"
+                          className="inline-flex rounded-md border bg-background p-0.5 hover:bg-accent"
+                          onClick={() => setImagePreviewUrl(r.foto_url!)}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={r.foto_url}
+                            alt={r.nombre}
+                            className="h-10 w-10 rounded-md object-cover"
+                          />
+                        </button>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
                     </td>
+                    <td className="px-3 py-2 align-top">{r.codigo_repuesto}</td>
+                    <td className="px-3 py-2 align-top">{r.nombre}</td>
+                    <td className="px-3 py-2 align-top max-w-xs whitespace-nowrap truncate" title={r.descripcion || "-"}>
+                      {r.descripcion || "-"}
+                    </td>
+                    <td className="px-3 py-2 align-top">{r.cantidad}</td>
+                    <td className="px-3 py-2 align-top">
+                      {r.precio !== null && r.precio !== undefined 
+                        ? new Intl.NumberFormat('es-CO', { 
+                            style: 'currency', 
+                            currency: 'COP',
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 0 
+                          }).format(r.precio)
+                        : "-"}
+                    </td>
+                    <td className="px-3 py-2 align-top">{r.ubicacion || "-"}</td>
+                    <td className="px-3 py-2 align-top text-right">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={() =>
+                          setExpandedRepuestoId(prev => (prev === r.id ? null : r.id))
+                        }
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </td>
+                    {isAdmin && (
+                      <td className="px-3 py-2 align-top">
+                        <div className="flex justify-end">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-7 w-7">
+                                <span className="sr-only">Acciones</span>
+                                ⋮
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="text-xs">
+                              <DropdownMenuItem onClick={() => openForEdit(r)}>
+                                Editar
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="text-red-600 focus:text-red-600"
+                                onClick={() => setDeleteTarget(r)}
+                              >
+                                Eliminar
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+
+                  {expandedRepuestoId === r.id && (
+                    <tr className="border-t bg-muted/30">
+                      <td
+                        className="px-3 py-3"
+                        colSpan={isAdmin ? 9 : 8}
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                          <div className="flex justify-center sm:justify-start">
+                            {r.foto_url ? (
+                              <button
+                                type="button"
+                                className="inline-flex rounded-md border bg-background p-1 hover:bg-accent"
+                                onClick={() => setImagePreviewUrl(r.foto_url!)}
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={r.foto_url}
+                                  alt={r.nombre}
+                                  className="h-32 w-32 rounded-md object-contain"
+                                />
+                              </button>
+                            ) : (
+                              <div className="h-32 w-32 rounded-md border bg-muted flex items-center justify-center text-xs text-muted-foreground">
+                                Sin imagen
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex-1 space-y-2 text-[11px] sm:text-xs">
+                            <div className="flex gap-2">
+                              <span className="font-medium text-muted-foreground shrink-0">Descripción:</span>
+                              <span className="whitespace-pre-wrap break-words">{r.descripcion || "-"}</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="font-medium text-muted-foreground shrink-0">Cantidad:</span>
+                              <span>{r.cantidad}</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="font-medium text-muted-foreground shrink-0">Precio:</span>
+                              <span>
+                                {r.precio !== null && r.precio !== undefined 
+                                  ? new Intl.NumberFormat('es-CO', { 
+                                      style: 'currency', 
+                                      currency: 'COP',
+                                      minimumFractionDigits: 0,
+                                      maximumFractionDigits: 0 
+                                    }).format(r.precio)
+                                  : "-"}
+                              </span>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="font-medium text-muted-foreground shrink-0">Ubicación:</span>
+                              <span>{r.ubicacion || "-"}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
                   )}
-                </tr>
+                </React.Fragment>
               ))}
             </tbody>
           </table>
@@ -753,6 +1010,24 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
                 Eliminar
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {imagePreviewUrl && (
+        <Dialog open={!!imagePreviewUrl} onOpenChange={(open) => !open && setImagePreviewUrl(null)}>
+          <DialogContent className="max-w-xl">
+            <DialogHeader>
+              <DialogTitle>Imagen del repuesto</DialogTitle>
+            </DialogHeader>
+            <div className="flex justify-center items-center mt-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imagePreviewUrl}
+                alt="Imagen del repuesto"
+                className="max-h-[70vh] w-auto rounded-md object-contain"
+              />
+            </div>
           </DialogContent>
         </Dialog>
       )}

@@ -161,13 +161,46 @@ export function LocativeEquipmentForm() {
                 value={isCustomArea ? "Otros" : field.value}
               >
                 <FormControl>
-                  <SelectTrigger>
+                  <SelectTrigger
+                    onKeyDown={(e) => {
+                      if (e.key === 'Tab' || e.key === 'Enter' || e.key === 'Escape') {
+                        return; // Permitir teclas de navegación
+                      }
+                      e.stopPropagation();
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                    }}
+                  >
                     <SelectValue placeholder="Selecciona un área" />
                   </SelectTrigger>
                 </FormControl>
-                <SelectContent>
+                <SelectContent
+                  onKeyDown={(e) => {
+                    if (e.key === 'Tab' || e.key === 'Enter' || e.key === 'Escape') {
+                      return; // Permitir teclas de navegación
+                    }
+                    e.stopPropagation();
+                  }}
+                  onWheel={(e) => {
+                    e.stopPropagation();
+                  }}
+                  className="max-h-[300px] overflow-y-auto overscroll-contain scroll-smooth"
+                >
                   {areaOptions.map((option) => (
-                    <SelectItem key={option} value={option}>
+                    <SelectItem
+                      key={option}
+                      value={option}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Tab' || e.key === 'Enter' || e.key === 'Escape') {
+                          return; // Permitir teclas de navegación
+                        }
+                        e.stopPropagation();
+                      }}
+                    >
                       {option}
                     </SelectItem>
                   ))}

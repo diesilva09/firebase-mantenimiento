@@ -193,7 +193,7 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
       <DialogContent className="w-full max-w-lg sm:max-w-xl md:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Completar Tarea: {task.code}</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="whitespace-pre-wrap break-all text-xs sm:text-sm">
             {task.description}
           </DialogDescription>
         </DialogHeader>

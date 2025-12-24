@@ -74,19 +74,52 @@ export function TaskCalendarView({ tasks, onTaskClick }: TaskCalendarViewProps) 
   return (
     <Card>
       <CardContent className="p-2 sm:p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base sm:text-xl font-bold capitalize">
-            {format(currentDate, 'MMMM yyyy', { locale: es })}
-          </h2>
-          <div className="flex items-center gap-1 sm:gap-2">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 mb-4">
+          <div className="flex items-center gap-2">
             <Button variant="outline" size="icon" className="h-8 w-8 sm:h-9 sm:w-9" onClick={() => setCurrentDate(subMonths(currentDate, 1))}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setCurrentDate(new Date())}>Hoy</Button>
+            <div className="flex items-center gap-2">
+              <select
+                className="h-9 rounded-md border border-input bg-background px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                value={format(currentDate, 'MM')}
+                onChange={(e) => {
+                  const newMonth = parseInt(e.target.value) - 1;
+                  const newDate = new Date(currentDate.getFullYear(), newMonth, currentDate.getDate());
+                  setCurrentDate(newDate);
+                }}
+              >
+                {Array.from({ length: 12 }, (_, i) => (
+                  <option key={i} value={String(i + 1).padStart(2, '0')}>
+                    {format(new Date(2000, i, 1), 'MMMM', { locale: es })}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                className="h-9 rounded-md border border-input bg-background px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                value={format(currentDate, 'yyyy')}
+                onChange={(e) => {
+                  const newYear = parseInt(e.target.value);
+                  const newDate = new Date(newYear, currentDate.getMonth(), currentDate.getDate());
+                  setCurrentDate(newDate);
+                }}
+              >
+                {Array.from({ length: 10 }, (_, i) => {
+                  const year = new Date().getFullYear() - 5 + i;
+                  return (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
             <Button variant="outline" size="icon" className="h-8 w-8 sm:h-9 sm:w-9" onClick={() => setCurrentDate(addMonths(currentDate, 1))}>
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
+          <Button variant="outline" size="sm" onClick={() => setCurrentDate(new Date())}>Hoy</Button>
         </div>
         
         {hasTasks ? (

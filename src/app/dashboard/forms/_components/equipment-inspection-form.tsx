@@ -21,7 +21,7 @@ const formSchema = z.object({
   observaciones: z.string().min(1, "Las observaciones son requeridas."),
 })
 
-type EquipmentLookup = { codigo: string; nombre: string }
+type EquipmentLookup = { codigo: string; nombre: string; area?: string | null; linea?: string | null }
 
 export function EquipmentInspectionForm() {
   const { toast } = useToast()
@@ -43,17 +43,47 @@ export function EquipmentInspectionForm() {
   })
 
   useEffect(() => {
-    try {
-      const raw = typeof window !== "undefined" ? localStorage.getItem("equipos") : null
-      if (!raw) return
-      const parsed = JSON.parse(raw) as any[]
-      const mapped: EquipmentLookup[] = parsed
-        .filter((e) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
-        .map((e) => ({ codigo: e.codigo, nombre: e.nombre }))
-      setEquipos(mapped)
-    } catch (e) {
-      console.warn("No se pudo cargar la lista de equipos para autocompletar", e)
+    const fetchEquipos = async () => {
+      try {
+        const response = await fetch('/api/equipos')
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const data = await response.json()
+        const equiposData = Array.isArray(data?.data) ? data.data : []
+
+        const mapped: EquipmentLookup[] = equiposData
+          .filter((e: any) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
+          .map((e: any) => ({
+            codigo: e.codigo,
+            nombre: e.nombre,
+            area: e.area ?? null,
+            linea: e.linea ?? null,
+          }))
+
+        setEquipos(mapped)
+      } catch (e) {
+        console.warn("No se pudo cargar la lista de equipos desde la API para autocompletar", e)
+
+        // Fallback a localStorage si la API falla
+        try {
+          const raw = typeof window !== "undefined" ? localStorage.getItem("equipos") : null
+          if (!raw) return
+          const parsed = JSON.parse(raw) as any[]
+          const mapped: EquipmentLookup[] = parsed
+            .filter((e) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
+            .map((e) => ({
+              codigo: e.codigo,
+              nombre: e.nombre,
+              area: e.area ?? null,
+              linea: e.linea ?? null,
+            }))
+          setEquipos(mapped)
+        } catch (localError) {
+          console.warn("Fallback a localStorage para equipos también falló", localError)
+        }
+      }
     }
+
+    fetchEquipos()
   }, [])
 
   const filteredEquipos = useMemo(() => {
@@ -72,12 +102,20 @@ export function EquipmentInspectionForm() {
     setIsLoading(true)
     
     try {
+      // Asegurar que en la BD se guarde solo el código limpio del equipo
+      const codigoEquipo = values.equipo.split(' - ')[0].trim()
+
+      const payload = {
+        ...values,
+        equipo: codigoEquipo,
+      }
+
       const response = await fetch('/api/equipment-inspections', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(values),
+        body: JSON.stringify(payload),
       })
 
       const result = await response.json()
@@ -136,17 +174,23 @@ export function EquipmentInspectionForm() {
                     <button
                       type="button"
                       key={e.codigo}
-                      className="flex w-full items-start gap-2 px-2 py-1.5 text-left hover:bg-accent"
+                      className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
                       onMouseDown={(ev) => {
                         ev.preventDefault()
-                        const label = `${e.codigo} - ${e.nombre}`
+                        const areaText = e.area ?? "Sin área"
+                        const lineaText = e.linea ?? "Sin línea"
+                        const label = `${e.codigo} - ${areaText}${e.linea ? ` - ${lineaText}` : ""} - ${e.nombre}`
                         setEquipoQuery(label)
                         field.onChange(label)
                         setShowEquipoSuggestions(false)
                       }}
                     >
                       <span className="font-medium">{e.codigo}</span>
-                      <span className="text-[11px] text-muted-foreground">{e.nombre}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {e.area ?? "Sin área"}
+                        {e.linea ? ` • ${e.linea}` : ""}
+                        {` • ${e.nombre}`}
+                      </span>
                     </button>
                   ))}
                 </div>

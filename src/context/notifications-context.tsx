@@ -30,6 +30,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [permission, setPermission] = useState<NotificationPermissionState>("unsupported");
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+  const [readIds, setReadIds] = useState<string[]>([]);
 
   // Leer permiso inicial (solo en cliente) y memo sencillo en localStorage para no molestar siempre
   useEffect(() => {
@@ -86,6 +87,22 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     }
   }, []);
 
+  // Cargar IDs leídos desde localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem('read-notifications');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setReadIds(parsed);
+        }
+      }
+    } catch (e) {
+      console.warn('No se pudieron cargar notificaciones leídas', e);
+    }
+  }, []);
+
   // Guardar IDs ocultos en localStorage
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -95,6 +112,16 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       console.warn('No se pudieron guardar notificaciones ocultas', e);
     }
   }, [hiddenIds]);
+
+  // Guardar IDs leídos en localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem('read-notifications', JSON.stringify(readIds));
+    } catch (e) {
+      console.warn('No se pudieron guardar notificaciones leídas', e);
+    }
+  }, [readIds]);
 
   
 
@@ -118,9 +145,16 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     }
   };
 
+  // Aplicar hidden + estado leído persistente
   const visibleNotifications = useMemo(
-    () => notifications.filter((n) => !hiddenIds.includes(n.id)),
-    [notifications, hiddenIds]
+    () =>
+      notifications
+        .filter((n) => !hiddenIds.includes(n.id))
+        .map((n) => ({
+          ...n,
+          read: readIds.includes(n.id) ? true : n.read,
+        })),
+    [notifications, hiddenIds, readIds]
   );
 
   const unreadCount = useMemo(
@@ -129,13 +163,21 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   );
 
   const markAsRead = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+    setReadIds((prev) =>
+      prev.includes(id) ? prev : [...prev, id]
     );
   };
 
   const markAllAsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setReadIds((prev) => {
+      const set = new Set(prev);
+      notifications.forEach((n) => {
+        if (!hiddenIds.includes(n.id)) {
+          set.add(n.id);
+        }
+      });
+      return Array.from(set);
+    });
   };
 
   const hideNotification = (id: string) => {

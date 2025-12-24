@@ -38,6 +38,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import type { Task, User, Schedule, Priority } from "@/lib/types"
+import { useToast } from "@/hooks/use-toast"
 
 const taskSchema = z
   .object({
@@ -72,9 +73,12 @@ interface EditTaskDialogProps {
 }
 
 type EquipmentLookup = { codigo: string; nombre: string; area?: string | null }
+type ZonaLookup = { id: string; codigo: string | null; nombre: string; area: string | null; tipo: string }
 
 export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: EditTaskDialogProps) {
+  const { toast } = useToast()
   const [equipos, setEquipos] = useState<EquipmentLookup[]>([])
+  const [zonas, setZonas] = useState<ZonaLookup[]>([])
   const [codeQuery, setCodeQuery] = useState("")
   const [areaQuery, setAreaQuery] = useState("")
   const [showCodeSuggestions, setShowCodeSuggestions] = useState(false)
@@ -118,6 +122,30 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
 
     fetchEquipos()
   }, [])
+
+  // Cargar zonas para validación de FK y evitar error 23503
+  useEffect(() => {
+    const fetchZonas = async () => {
+      try {
+        const res = await fetch("/api/zonas");
+        if (!res.ok) return;
+        const json = await res.json().catch(() => ({}));
+        const data = Array.isArray(json?.data) ? json.data : [];
+        const mapped: ZonaLookup[] = data.map((z: any) => ({
+          id: String(z.id),
+          codigo: z.codigo ?? null,
+          nombre: z.nombre ?? "",
+          area: z.area ?? null,
+          tipo: z.tipo ?? "",
+        }));
+        setZonas(mapped);
+      } catch (e) {
+        console.warn("No se pudo cargar la lista de zonas", e);
+      }
+    };
+
+    fetchZonas();
+  }, []);
 
   useEffect(() => {
     if (isOpen && task) {
@@ -167,9 +195,36 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
       if (!task) return
 
       try {
+        const rawCode = data.code?.trim() || "";
+        
+        // Verificar existencia para evitar error de FK (codigo_equipo)
+        const matchedEquipo = equipos.find((e) => e.codigo === rawCode);
+        const matchedZona = zonas.find((z) => (z.codigo || z.nombre) === rawCode);
+
+        // Validar cronograma según el tipo de zona
+        if (matchedZona) {
+          if (matchedZona.tipo === "PARTES_ALTAS" && data.schedule !== "Partes Altas") {
+            toast({
+              title: "Cronograma incorrecto",
+              description: "Esta zona pertenece a Partes Altas. Debe seleccionar el cronograma 'Partes Altas'.",
+              variant: "destructive",
+            })
+            return
+          }
+          if (matchedZona.tipo === "LOCATIVO" && data.schedule !== "Mantenimiento Locativo") {
+            toast({
+              title: "Cronograma incorrecto",
+              description: "Esta zona pertenece a Mantenimiento Locativo. Debe seleccionar el cronograma 'Mantenimiento Locativo'.",
+              variant: "destructive",
+            })
+            return
+          }
+        }
+
         const tareaData = {
           id: task.id,
-          codigo_equipo: data.code,
+          codigo_equipo: matchedEquipo ? matchedEquipo.codigo : null,
+          codigo_zona: !matchedEquipo && matchedZona ? (matchedZona.codigo || matchedZona.nombre) : null,
           area: data.area,
           titulo: data.description,
           descripcion: data.description,
@@ -229,7 +284,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
         console.error('Error actualizando tarea:', error)
       }
     },
-    [task, users, onEditTask, setIsOpen],
+    [task, users, onEditTask, setIsOpen, equipos, zonas, toast],
   )
 
   if (!task) {

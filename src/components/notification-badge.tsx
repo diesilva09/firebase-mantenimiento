@@ -155,7 +155,10 @@ export function NotificationBadge() {
             ${borderColor}
             ${!notification.read ? bgUnread : ''}
           `}
-          onClick={() => markAsRead(notification.id)}
+          onClick={() => {
+            // Solo marcar como leída para bajar el contador, pero mantenerla en la bandeja
+            markAsRead(notification.id)
+          }}
         >
           <div className="flex gap-3 w-full">
             <div className="text-lg flex-shrink-0">

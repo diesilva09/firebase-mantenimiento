@@ -20,6 +20,7 @@ import {
 import { DashboardHeader } from "@/components/dashboard-header"
 import { Logo } from "@/components/icons"
 import { useUser } from "@/firebase/auth/use-user"
+import { Box } from "lucide-react"
 
 export default function DashboardLayout({
   children,
@@ -46,27 +47,32 @@ export default function DashboardLayout({
   }
 
   const navItems = [
-  {
-    href: "/dashboard/tasks",
-    icon: LayoutGrid,
-    label: "Cronogramas",
-  },
-  {
-    href: "/dashboard/forms",
-    icon: ClipboardList,
-    label: "Formularios",
-  },
-  {
-    href: "/dashboard/equipos",
-    icon: Wrench,
-    label: "Equipos",
-  },
-  {
-    href: "/dashboard/zonas",
-    icon: MapPin,
-    label: "Zonas",
-  },
-]
+    {
+      href: "/dashboard/tasks",
+      icon: LayoutGrid,
+      label: "Cronogramas",
+    },
+    {
+      href: "/dashboard/forms",
+      icon: ClipboardList,
+      label: "Formularios",
+    },
+    {
+      href: "/dashboard/equipos",
+      icon: Wrench,
+      label: "Equipos",
+    },
+    {
+      href: "/dashboard/zonas",
+      icon: MapPin,
+      label: "Locativo",
+    },
+    {
+      href: "/dashboard/inventario",
+      icon: Box,
+      label: "Inventario",
+    },
+  ]
 
   return (
     <SidebarProvider>

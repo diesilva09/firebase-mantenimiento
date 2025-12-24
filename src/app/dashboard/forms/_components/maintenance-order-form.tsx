@@ -45,7 +45,7 @@ export function MaintenanceOrderForm() {
     },
   })
 
-  type EquipmentLookup = { codigo: string; nombre: string }
+  type EquipmentLookup = { codigo: string; nombre: string; area?: string | null; linea?: string | null }
 
   type ZonaLookup = { id: string; nombre: string; area: string | null; tipo: string }
 
@@ -58,17 +58,47 @@ export function MaintenanceOrderForm() {
   const [showZonaSuggestions, setShowZonaSuggestions] = useState(false)
 
   useEffect(() => {
-    try {
-      const raw = typeof window !== "undefined" ? localStorage.getItem("equipos") : null
-      if (!raw) return
-      const parsed = JSON.parse(raw) as any[]
-      const mapped: EquipmentLookup[] = parsed
-        .filter((e) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
-        .map((e) => ({ codigo: e.codigo, nombre: e.nombre }))
-      setEquipos(mapped)
-    } catch (e) {
-      console.warn("No se pudo cargar la lista de equipos para autocompletar", e)
+    const fetchEquipos = async () => {
+      try {
+        const response = await fetch('/api/equipos')
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const data = await response.json()
+        const equiposData = Array.isArray(data?.data) ? data.data : []
+
+        const mapped: EquipmentLookup[] = equiposData
+          .filter((e: any) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
+          .map((e: any) => ({
+            codigo: e.codigo,
+            nombre: e.nombre,
+            area: e.area ?? null,
+            linea: e.linea ?? null,
+          }))
+
+        setEquipos(mapped)
+      } catch (e) {
+        console.warn("No se pudo cargar la lista de equipos desde la API para autocompletar", e)
+
+        // Fallback a localStorage si la API falla
+        try {
+          const raw = typeof window !== "undefined" ? localStorage.getItem("equipos") : null
+          if (!raw) return
+          const parsed = JSON.parse(raw) as any[]
+          const mapped: EquipmentLookup[] = parsed
+            .filter((e) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
+            .map((e) => ({
+              codigo: e.codigo,
+              nombre: e.nombre,
+              area: e.area ?? null,
+              linea: e.linea ?? null,
+            }))
+          setEquipos(mapped)
+        } catch (localError) {
+          console.warn("Fallback a localStorage para equipos también falló", localError)
+        }
+      }
     }
+
+    fetchEquipos()
   }, [])
 
   useEffect(() => {
@@ -153,6 +183,31 @@ export function MaintenanceOrderForm() {
 
     const nuevaOrden = await response.json();
 
+    // También crear registro en la hoja de vida del equipo (equipos_historial)
+    try {
+      const historialPayload = {
+        codigoEquipo,
+        tareaId: null,
+        fechaEvento: new Date().toISOString(),
+        labor: values.descripcionFalla,
+        tipoMantenimiento: values.tipoMantenimiento,
+        repuestosUsados: values.repuestos,
+        observaciones: values.observaciones,
+        ejecutadoPor: values.responsableMantenimiento,
+        creadoPor: null,
+      };
+
+      await fetch('/api/equipos/historial', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(historialPayload),
+      });
+    } catch (e) {
+      console.warn('No se pudo registrar la orden en equipos_historial', e);
+    }
+
     // Opcional: mantener compatibilidad con localStorage temporalmente
     try {
       const fecha = new Date().toISOString().slice(0, 10);
@@ -172,7 +227,7 @@ export function MaintenanceOrderForm() {
 
     toast({
       title: "✅ Orden Guardada en BD",
-      description: `Orden #${nuevaOrden.id} creada exitosamente`,
+      description: `Orden guardada exitosamente`,
     });
     
     // Limpiar formulario
@@ -224,10 +279,12 @@ export function MaintenanceOrderForm() {
                     <button
                       type="button"
                       key={e.codigo}
-                      className="flex w-full items-start gap-2 px-2 py-1.5 text-left hover:bg-accent"
+                      className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
                       onMouseDown={(ev) => {
                         ev.preventDefault()
-                        const label = `${e.codigo} - ${e.nombre}`
+                        const areaText = e.area ?? "Sin área"
+                        const lineaText = e.linea ?? "Sin línea"
+                        const label = `${e.codigo} - ${areaText}${e.linea ? ` - ${lineaText}` : ""} - ${e.nombre}`
                         setEquipoQuery(label)
                         field.onChange(label)
                         form.setValue("codigoEquipo", e.codigo)
@@ -235,7 +292,11 @@ export function MaintenanceOrderForm() {
                       }}
                     >
                       <span className="font-medium">{e.codigo}</span>
-                      <span className="text-[11px] text-muted-foreground">{e.nombre}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {e.area ?? "Sin área"}
+                        {e.linea ? ` • ${e.linea}` : ""}
+                        {` • ${e.nombre}`}
+                      </span>
                     </button>
                   ))}
                 </div>

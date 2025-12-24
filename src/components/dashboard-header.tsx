@@ -22,6 +22,8 @@ export function DashboardHeader() {
     placeholder = "Buscar formularios..."
   } else if (pathname.startsWith("/dashboard/equipos")) {
     placeholder = "Buscar equipos..."
+  } else if (pathname.startsWith("/dashboard/inventario")) {
+    placeholder = "Buscar repuestos..."
   }
 
   const handleLogout = async () => {
@@ -29,18 +31,13 @@ export function DashboardHeader() {
     router.push('/login')
   }
 
-  // Filtrar sugerencias según el texto y la sección actual
+  // Filtrar sugerencias según el texto, sin filtrar por tipo de página para permitir búsqueda global
   const filteredSuggestions = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return []
 
-    let typeFilter: "task" | "form" | "equipo" | null = null
-    if (pathname.startsWith("/dashboard/tasks")) typeFilter = "task"
-    else if (pathname.startsWith("/dashboard/forms")) typeFilter = "form"
-    else if (pathname.startsWith("/dashboard/equipos")) typeFilter = "equipo"
-
+    // No filtrar por tipo de página para permitir búsqueda global de todas las sugerencias
     return suggestions
-      .filter((s) => !typeFilter || s.type === typeFilter)
       .filter((s) => s.label.toLowerCase().includes(q))
       .slice(0, 10)
   }, [suggestions, query, pathname])

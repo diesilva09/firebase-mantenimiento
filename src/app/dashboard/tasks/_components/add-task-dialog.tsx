@@ -40,6 +40,7 @@ import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import type { Task, User, Schedule, Priority, Notification } from "@/lib/types"
 import { useNotifications } from "@/hooks/use-notifications"
+import { useToast } from "@/hooks/use-toast"
 
 const taskSchema = z
   .object({
@@ -74,6 +75,7 @@ interface AddTaskDialogProps {
 
 export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDialogProps) {
   const { addNotification, permission } = useNotifications()
+  const { toast } = useToast()
   const form = useForm<TaskFormValues>({
     resolver: zodResolver(taskSchema),
     defaultValues: {
@@ -88,9 +90,7 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
     },
   })
 
-  
-
-  type EquipmentLookup = { codigo: string; nombre: string; area?: string | null }
+  type EquipmentLookup = { codigo: string; nombre: string; area?: string | null; linea?: string | null }
   type ZonaLookup = { id: string; codigo: string | null; nombre: string; area: string | null; tipo: string }
 
   const [equipos, setEquipos] = useState<EquipmentLookup[]>([])
@@ -112,7 +112,8 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
         .map((e: any) => ({ 
           codigo: e.codigo, 
           nombre: e.nombre, 
-          area: e.area 
+          area: e.area ?? null,
+          linea: e.linea ?? null,
         }));
       
       setEquipos(mapped);
@@ -129,7 +130,8 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
           .map((e) => ({ 
             codigo: e.codigo, 
             nombre: e.nombre, 
-            area: e.area 
+            area: e.area ?? null,
+            linea: e.linea ?? null,
           }));
         setEquipos(mapped);
       } catch (localError) {
@@ -220,6 +222,26 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
     // Verificar si el código corresponde a una zona conocida
     const matchedZona = zonas.find((z) => (z.codigo || z.nombre) === rawCode);
 
+    // Validar cronograma según el tipo de zona
+    if (matchedZona) {
+      if (matchedZona.tipo === "PARTES_ALTAS" && data.schedule !== "Partes Altas") {
+        toast({
+          title: "Cronograma incorrecto",
+          description: "Esta zona pertenece a Partes Altas. Debe seleccionar el cronograma 'Partes Altas'.",
+          variant: "destructive",
+        })
+        return
+      }
+      if (matchedZona.tipo === "LOCATIVO" && data.schedule !== "Mantenimiento Locativo") {
+        toast({
+          title: "Cronograma incorrecto",
+          description: "Esta zona pertenece a Mantenimiento Locativo. Debe seleccionar el cronograma 'Mantenimiento Locativo'.",
+          variant: "destructive",
+        })
+        return
+      }
+    }
+
     // Si es un equipo conocido, usamos su código; si no, mandamos null para no romper la FK
     const codigoEquipoForDB = matchedEquipo ? matchedEquipo.codigo : null;
 
@@ -260,11 +282,9 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
 
     const nuevaTarea = await response.json();
 
-        // Crear notificación interna para la nueva tarea
-       // Crear notificación interna para la nueva tarea
+    // Crear notificación interna para la nueva tarea
     try {
-      const notif: Notification = {
-        id: `task-created-${nuevaTarea.id ?? Date.now()}`,
+      const baseNotif: Omit<Notification, "id" | "createdAt"> = {
         title: `Nueva tarea en ${data.area || 'Área sin nombre'}`,
         message: `Equipo: ${data.code || 'Sin código'}\nDescripción: ${data.description}`,
         type: "task_alert",
@@ -274,30 +294,60 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
             : data.priority === "Media"
             ? "warning"
             : "info",
-        createdAt: new Date().toISOString(),
         read: false,
         refId: nuevaTarea.id ?? undefined,
         status: data.nextExecution > new Date() ? "Futura" : "Pendiente",
       }
 
-      // Guardar notificación en la BD
+      // Guardar notificación en la BD y usar el id real devuelto
+      let finalNotif: Notification | null = null
       try {
-        await fetch('/api/notificaciones', {
+        const resNotif = await fetch('/api/notificaciones', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            titulo: notif.title,
-            mensaje: notif.message,
-            tipo: notif.type,
-            severidad: notif.severity,
-            estado_tarea: notif.status,
+            titulo: baseNotif.title,
+            mensaje: baseNotif.message,
+            tipo: baseNotif.type,
+            severidad: baseNotif.severity,
+            estado_tarea: baseNotif.status,
             prioridad: data.priority,
             ref_task_id: nuevaTarea.id ?? null,
           }),
         })
+
+        if (resNotif.ok) {
+          const jsonNotif = await resNotif.json()
+          const saved = jsonNotif.data
+          finalNotif = {
+            id: String(saved.id),
+            title: baseNotif.title,
+            message: baseNotif.message,
+            type: baseNotif.type,
+            severity: baseNotif.severity,
+            createdAt: new Date(saved.creado_en).toISOString(),
+            read: false,
+            refId: String(saved.ref_task_id ?? baseNotif.refId ?? ""),
+            status: baseNotif.status,
+          }
+        }
       } catch (e) {
         console.warn('No se pudo guardar la notificación en BD', e)
       }
+
+      // Fallback en caso de que falle la BD
+      const notif: Notification =
+        finalNotif ?? {
+          id: `task-created-${nuevaTarea.id ?? Date.now()}`,
+          title: baseNotif.title,
+          message: baseNotif.message,
+          type: baseNotif.type,
+          severity: baseNotif.severity,
+          createdAt: new Date().toISOString(),
+          read: false,
+          refId: baseNotif.refId,
+          status: baseNotif.status,
+        }
 
       // Actualizar contexto en memoria
       addNotification(notif)
@@ -404,7 +454,9 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                                 onMouseDown={(ev) => {
                                   ev.preventDefault()
                                   const codeLabel = e.codigo
-                                  const areaLabel = e.area ? `${e.area} - ${e.nombre}` : e.nombre
+                                  const areaText = e.area ?? "Sin área"
+                                  const lineaText = e.linea ?? "Sin línea"
+                                  const areaLabel = `${areaText} - ${lineaText} - ${e.nombre}`
                                   setCodeQuery(codeLabel)
                                   field.onChange(codeLabel)
                                   form.setValue("area", areaLabel)
@@ -413,7 +465,11 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                                 }}
                               >
                                 <span className="font-medium">{e.codigo}</span>
-                                <span className="text-[11px] text-muted-foreground">{e.area ? `${e.area} • ${e.nombre}` : e.nombre}</span>
+                                <span className="text-[11px] text-muted-foreground">
+                                  {e.area ?? "Sin área"}
+                                  {e.linea ? ` • ${e.linea}` : ""}
+                                  {` • ${e.nombre}`}
+                                </span>
                               </button>
                             ))}
                           </>
@@ -436,6 +492,12 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                                   form.setValue("area", areaLabel);
                                   setAreaQuery(areaLabel);
                                   setShowCodeSuggestions(false);
+
+                                  if (z.tipo === "PARTES_ALTAS") {
+                                    form.setValue("schedule", "Partes Altas")
+                                  } else if (z.tipo === "LOCATIVO") {
+                                    form.setValue("schedule", "Mantenimiento Locativo")
+                                  }
                                 }}
                               >
                                 <span className="font-medium">{z.area ?? "Sin área"}</span>
@@ -486,7 +548,9 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                                 className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
                                 onMouseDown={(ev) => {
                                   ev.preventDefault();
-                                  const areaLabel = e.area ? `${e.area} - ${e.nombre}` : e.nombre;
+                                  const areaText = e.area ?? "Sin área";
+                                  const lineaText = e.linea ?? "Sin línea";
+                                  const areaLabel = `${areaText} - ${lineaText} - ${e.nombre}`;
                                   setAreaQuery(areaLabel);
                                   field.onChange(areaLabel);
                                   setCodeQuery(e.codigo);
@@ -495,7 +559,10 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                                 }}
                               >
                                 <span className="font-medium">{e.area ?? "Sin área"}</span>
-                                <span className="text-[11px] text-muted-foreground">{e.codigo} • {e.nombre}</span>
+                                <span className="text-[11px] text-muted-foreground">
+                                  {e.linea ? `${e.linea} • ` : ""}
+                                  {e.codigo} • {e.nombre}
+                                </span>
                               </button>
                             ))}
                           </>
@@ -519,6 +586,12 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                                   setCodeQuery(zoneCode);
                                   form.setValue("code", zoneCode);
                                   setShowAreaSuggestions(false);
+
+                                  if (z.tipo === "PARTES_ALTAS") {
+                                    form.setValue("schedule", "Partes Altas")
+                                  } else if (z.tipo === "LOCATIVO") {
+                                    form.setValue("schedule", "Mantenimiento Locativo")
+                                  }
                                 }}
                               >
                                 <span className="font-medium">{z.area ?? "Sin área"}</span>

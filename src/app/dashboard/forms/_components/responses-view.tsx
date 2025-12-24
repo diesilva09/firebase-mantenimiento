@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import {
   Table,
   TableBody,
@@ -26,6 +27,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { getAllSubmissions, getFormsMetadata } from '@/lib/submissions-service'
+import { useEquipos } from '@/hooks/use-equipos'
 
 interface ResponsesViewProps {
   submissions?: Submission[]; // Hacer opcional para poder usar sin props
@@ -40,6 +42,32 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
   const [selectedSubmission, setSelectedSubmission] = React.useState<Submission | null>(null)
   const [isDetailViewOpen, setIsDetailViewOpen] = React.useState(false)
   const [loading, setLoading] = React.useState(!initialSubmissions) // Solo loading si no vienen props
+
+  const { equipos } = useEquipos()
+
+  const formatEquipoLabel = React.useCallback(
+    (raw: string) => {
+      const codigo = raw.trim()
+      if (!codigo) return raw
+
+      const eq = equipos.find((e) => e.codigo === codigo)
+      if (!eq) return raw
+
+      const area = eq.area || ''
+      const linea = (eq as any).linea || ''
+      const nombre = eq.nombre || ''
+
+      const parts = [
+        codigo,
+        area,
+        linea,
+        nombre,
+      ].filter(Boolean)
+
+      return parts.join(' - ')
+    },
+    [equipos],
+  )
 
   // Cargar datos si no se pasan como props
   React.useEffect(() => {
@@ -210,9 +238,30 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
                         ))}
                       </div>
                     ) : (
-                      <span className="font-semibold whitespace-pre-wrap break-all inline-block max-w-xs">
-                        {String(value)}
-                      </span>
+                      (() => {
+                        const stringValue = String(value)
+                        const trimmed = stringValue.trim()
+                        const equipoMatch = equipos.find(e => e.codigo === trimmed)
+
+                        if (equipoMatch) {
+                          return (
+                            <Link
+                              href={`/dashboard/equipos/${encodeURIComponent(equipoMatch.codigo)}?view=hoja-vida`}
+                              className="font-semibold whitespace-pre-wrap break-all inline-block max-w-xs text-blue-600 hover:underline"
+                            >
+                              {formatEquipoLabel(stringValue)}
+                            </Link>
+                          )
+                        }
+
+                        return (
+                          <span className="font-semibold whitespace-pre-wrap break-all inline-block max-w-xs">
+                            {key.toLowerCase() === 'equipo'
+                              ? formatEquipoLabel(stringValue)
+                              : stringValue}
+                          </span>
+                        )
+                      })()
                     )}
                   </div>
                 </div>

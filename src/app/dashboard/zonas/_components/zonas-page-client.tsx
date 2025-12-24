@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -54,22 +55,24 @@ const AREAS_LOCATIVO = [
   "Casino",
   "Servicios de Apoyo",
   "Lagarde",
-  "General / sin area específica"
+  "General / Sin área específica"
 ] as const;
-
-function toTitleCase(text: string) {
-  return text
-    .toLowerCase()
-    .split(" ")
-    .map((word) =>
-      word.length === 0 ? "" : word[0].toUpperCase() + word.slice(1)
-    )
-    .join(" ");
-}
 
 type ZonaTipo = "PARTES_ALTAS" | "LOCATIVO";
 
+interface Zona {
+  id: string;
+  tipo: ZonaTipo;
+  area: string | null;
+  codigo: string | null;
+  nombre: string;
+}
+
 export function ZonasPageClient() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const selectedZonaCodigoFromQuery = searchParams.get("selectedZonaCodigo") || null;
+
   const [tipo, setTipo] = useState<ZonaTipo>("PARTES_ALTAS");
   const [area, setArea] = useState<string | null>(null);
 
@@ -80,30 +83,33 @@ export function ZonasPageClient() {
   const [nombre, setNombre] = useState("");
   const [areaInput, setAreaInput] = useState("");
   const [saving, setSaving] = useState(false);
-  const [zonas, setZonas] = useState<any[]>([]);
+  const [zonas, setZonas] = useState<Zona[]>([]);
   const [loadingZonas, setLoadingZonas] = useState(false);
-  const [editingZona, setEditingZona] = useState<any | null>(null);
+  const [editingZona, setEditingZona] = useState<Zona | null>(null);
 
   const { user } = useUser();
-  const router = useRouter();
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
   const { setSuggestions } = useDashboardSearch();
 
+  const [deleteTarget, setDeleteTarget] = useState<Zona | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [checkingAdmin, setCheckingAdmin] = useState(true);
+
+  const [codigoDuplicado, setCodigoDuplicado] = useState(false);
+
+  // Estado para mantener el resaltado de la zona buscada
+  const [highlightedZonaCodigo, setHighlightedZonaCodigo] = useState<string | null>(null);
+
   useEffect(() => {
     const fetchZonas = async () => {
       try {
         setLoadingZonas(true);
 
-        const params = new URLSearchParams();
-        params.set("tipo", tipo);
-        if (area) {
-          params.set("area", area);
-        }
-
-        const res = await fetch(`/api/zonas?${params.toString()}`);
+        // Cargar TODAS las zonas para poder validar códigos duplicados globalmente
+        const res = await fetch(`/api/zonas`);
         if (!res.ok) {
           console.warn("Error cargando zonas");
           setZonas([]);
@@ -122,60 +128,178 @@ export function ZonasPageClient() {
     };
 
     fetchZonas();
-  }, [tipo, area]);
+  }, []); // Se ejecuta solo al montar el componente
 
+  // Registrar sugerencias globales para zonas con rutas de navegación
   useEffect(() => {
-    const items: SearchSuggestion[] = zonas.map((z) => ({
-      id: z.id,
-      label: `Zona: ${z.nombre} (${z.area || "Sin área"})`,
-      type: "task", // reutilizamos el tipo existente
-    }));
-    setSuggestions(items);
+    const items: SearchSuggestion[] = zonas.map((z) => {
+      const areaPart = z.area ? ` - ${z.area}` : "";
+      const tipoPart = z.tipo === "PARTES_ALTAS" ? " (Partes Altas)" : " (Locativo)";
+      const label = `${z.codigo || "SIN-COD"}${areaPart} - ${z.nombre}${tipoPart}`;
+
+      return {
+        id: z.id,
+        label,
+        type: "zona",
+        route: `/dashboard/zonas?selectedZonaCodigo=${encodeURIComponent(z.codigo || z.id)}`,
+      };
+    });
+    
+    setSuggestions((prev) => {
+      const others = prev.filter((s) => s.type !== "zona");
+      return [...others, ...items];
+    });
   }, [zonas, setSuggestions]);
 
   useEffect(() => {
-    const rawEmail =
-      user?.email ||
-      (typeof window !== "undefined" ? localStorage.getItem("userEmail") : null);
-    const normalizedEmail = rawEmail ? rawEmail.toLowerCase().trim() : null;
-    setUserEmail(normalizedEmail);
+    let mounted = true;
 
-    let envSaysAdmin = false;
-    if (normalizedEmail) {
-      const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "")
-        .split(",")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
+    async function checkAdmin() {
+      setCheckingAdmin(true);
+      const email = user?.email?.toLowerCase().trim();
+      setUserEmail(email || null);
 
-      envSaysAdmin = adminEnv.includes(normalizedEmail);
+      try {
+        if (user) {
+          // Validar rol desde backend para mayor seguridad
+          const response = await fetch('/api/auth/role', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              email: user.email,
+              uid: user.uid,
+            }),
+          });
+
+          if (response.ok) {
+            const roleData = await response.json();
+            if (mounted) setIsAdmin(roleData.isAdmin);
+          } else {
+            // Fallback a verificación local si la API falla
+            if (email) {
+              const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
+                .split(',')
+                .map((s) => s.trim().toLowerCase())
+                .filter(Boolean);
+
+              const isEnvAdmin = adminEnv.includes(email);
+              if (mounted) setIsAdmin(isEnvAdmin);
+            } else {
+              if (mounted) setIsAdmin(false);
+            }
+          }
+        } else {
+          if (mounted) setIsAdmin(false);
+        }
+      } catch (error) {
+        console.error('Error verificando rol de usuario:', error);
+        // Fallback seguro
+        if (email) {
+          const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
+            .split(',')
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean);
+
+          const isEnvAdmin = adminEnv.includes(email);
+          if (mounted) setIsAdmin(isEnvAdmin);
+        } else {
+          if (mounted) setIsAdmin(false);
+        }
+      } finally {
+        if (mounted) setCheckingAdmin(false);
+      }
     }
 
-    if (envSaysAdmin) {
-      setIsAdmin(true);
-      if (typeof window !== "undefined") {
-        localStorage.setItem("isAdmin", "true");
-        localStorage.setItem("userEmail", normalizedEmail || "");
-      }
+    checkAdmin();
+    return () => {
+      mounted = false;
+    };
+  }, [user]);
+
+  // Si venimos desde el buscador global con una zona seleccionada,
+  // expandir el tipo y área correctos para que la zona sea visible
+  useEffect(() => {
+    if (!selectedZonaCodigoFromQuery) return;
+    if (!zonas || zonas.length === 0) return;
+
+    const target = zonas.find((z) => z.codigo === selectedZonaCodigoFromQuery || z.id === selectedZonaCodigoFromQuery);
+    if (!target) return;
+
+    // Cambiar al tipo correcto (PARTES_ALTAS o LOCATIVO)
+    setTipo(target.tipo);
+
+    // Seleccionar el área correspondiente si existe
+    if (target.area) {
+      setArea(target.area);
+    }
+
+    // Marcar esta zona como resaltada
+    setHighlightedZonaCodigo(target.codigo || target.id);
+  }, [selectedZonaCodigoFromQuery, zonas]);
+
+  // Hacer scroll automático hasta la fila de la zona buscada
+  useEffect(() => {
+    if (!selectedZonaCodigoFromQuery) return;
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
+
+    const elementId = `zona-${selectedZonaCodigoFromQuery}`;
+
+    const tryScroll = () => {
+      const el = document.getElementById(elementId);
+
+      if (!el) return false;
+
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      // Limpiar selectedZonaCodigo de la URL usando replaceState para no perder el scroll
+      const params = new URLSearchParams(window.location.search);
+      params.delete('selectedZonaCodigo');
+      const queryString = params.toString();
+      const newUrl = queryString ? `/dashboard/zonas?${queryString}` : '/dashboard/zonas';
+      window.history.replaceState(null, '', newUrl);
+
+      return true;
+    };
+
+    // Intentar inmediatamente y, si aún no está montado, reintentar después de un delay
+    if (!tryScroll()) {
+      const timeout = setTimeout(() => {
+        tryScroll();
+      }, 300);
+
+      return () => clearTimeout(timeout);
+    }
+  }, [selectedZonaCodigoFromQuery, zonas]);
+
+  // Validación en vivo: evitar códigos de zona duplicados
+  useEffect(() => {
+    const raw = (codigo || "").toString().trim().toLowerCase();
+
+    if (!raw) {
+      setCodigoDuplicado(false);
       return;
     }
 
-    if (typeof window !== "undefined") {
-      const localFlag = localStorage.getItem("isAdmin");
-      if (localFlag === "true") {
-        setIsAdmin(true);
-        return;
-      }
-      if (localFlag === "false") {
-        setIsAdmin(false);
-        return;
-      }
-    }
+    const hasDuplicate = zonas.some((z) => {
+      const zCodigo = (z.codigo || "").toString().trim().toLowerCase();
+      if (editingZona && z.id === editingZona.id) return false;
+      return zCodigo === raw;
+    });
 
-    setIsAdmin(false);
-  }, [user]);
+    setCodigoDuplicado(hasDuplicate);
+  }, [codigo, zonas, editingZona]);
 
   const areasForTipo =
     tipo === "PARTES_ALTAS" ? AREAS_PARTES_ALTAS : AREAS_LOCATIVO;
+
+  // Filtramos las zonas en el cliente para la visualización, pero mantenemos 'zonas' con todo para validación
+  const filteredZonas = zonas.filter((z) => {
+    if (z.tipo !== tipo) return false;
+    if (area && z.area !== area) return false;
+    return true;
+  });
 
   const handleOpenDialog = () => {
     setEditingZona(null);
@@ -186,6 +310,15 @@ export function ZonasPageClient() {
   };
 
   const handleSaveZona = async () => {
+    if (codigoDuplicado) {
+      toast({
+        title: "Código duplicado",
+        description: "El código ingresado ya existe en esta lista.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!nombre.trim()) {
       toast({
         title: "Falta nombre",
@@ -254,7 +387,7 @@ export function ZonasPageClient() {
     }
   };
 
-  const handleEditZona = (zona: any) => {
+  const handleEditZona = (zona: Zona) => {
     setEditingZona(zona);
     setCodigo(zona.codigo || "");
     setNombre(zona.nombre || "");
@@ -263,34 +396,40 @@ export function ZonasPageClient() {
     setIsDialogOpen(true);
   };
 
-  const handleDeleteZona = async (zona: any) => {
-    if (!window.confirm(`¿Eliminar la zona "${zona.nombre}"?`)) return;
+  const performDeleteZona = async () => {
+  if (!deleteTarget) return;
 
-    try {
-      const res = await fetch(`/api/zonas?id=${zona.id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json?.error || "Error eliminando zona");
-      }
+  try {
+    setDeleteLoading(true);
 
-      setZonas((prev) => prev.filter((z) => z.id !== zona.id));
-
-      toast({
-        title: "Zona eliminada",
-        description: "La zona se ha eliminado correctamente.",
-      });
-    } catch (e: any) {
-      toast({
-        title: "Error al eliminar zona",
-        description: e?.message || "No se pudo eliminar la zona.",
-        variant: "destructive",
-      });
+    const res = await fetch(`/api/zonas?id=${deleteTarget.id}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json?.error || "Error eliminando zona");
     }
-  };
 
-  const handleOpenMantenimientos = (zona: any) => {
+    setZonas((prev) => prev.filter((z) => z.id !== deleteTarget.id));
+
+    toast({
+      title: "Zona eliminada",
+      description: "La zona se ha eliminado correctamente.",
+    });
+
+    setDeleteTarget(null);
+  } catch (e: any) {
+    toast({
+      title: "Error al eliminar zona",
+      description: e?.message || "No se pudo eliminar la zona.",
+      variant: "destructive",
+    });
+  } finally {
+    setDeleteLoading(false);
+  }
+};
+
+  const handleOpenMantenimientos = (zona: Zona) => {
     if (!zona.codigo) {
       toast({
         title: "Sin código de zona",
@@ -307,8 +446,10 @@ export function ZonasPageClient() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold">Zonas</h1>
-        <Button onClick={handleOpenDialog}>Registrar zona</Button>
+        <h1 className="text-2xl font-bold">Locativo</h1>
+        {isAdmin && (
+          <Button onClick={handleOpenDialog}>Registrar zona</Button>
+        )}
       </div>
 
       <Tabs
@@ -342,7 +483,7 @@ export function ZonasPageClient() {
               <option value="ALL">Todas las áreas</option>
               {areasForTipo.map((a) => (
                 <option key={a} value={a}>
-                  {tipo === "LOCATIVO" ? toTitleCase(a) : a}
+                  {a}
                 </option>
               ))}
             </select>
@@ -352,14 +493,14 @@ export function ZonasPageClient() {
         <TabsContent value="PARTES_ALTAS" className="mt-4">
           {loadingZonas ? (
             <p className="text-sm text-muted-foreground">Cargando zonas...</p>
-          ) : zonas.length === 0 ? (
+          ) : filteredZonas.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No hay zonas registradas para este tipo/área.
             </p>
           ) : (
-            <div className="rounded-md border bg-blue-50">
+            <div className="rounded-md border bg-blue-50 max-h-[500px] overflow-y-auto overscroll-contain scroll-smooth">
               <table className="w-full text-sm">
-                <thead className="bg-blue-50 -blue-700">
+                <thead className="bg-blue-50 text-blue-700">
                   <tr>
                     <th className="px-3 py-2 text-left">Área</th>
                     <th className="px-3 py-2 text-left">Código</th>
@@ -368,17 +509,37 @@ export function ZonasPageClient() {
                   </tr>
                 </thead>
                 <tbody>
-                  {zonas.map((z) => (
-                    <tr key={z.id} className="border-t bg-white">
-                      <td className="px-3 py-2">{z.area || "—"}</td>
-                      <td className="px-3 py-2">{z.codigo || "—"}</td>
-                      <td className="px-3 py-2">{z.nombre}</td>
+                  {filteredZonas.map((z) => {
+                    const isHighlighted = highlightedZonaCodigo && (z.codigo === highlightedZonaCodigo || z.id === highlightedZonaCodigo);
+                    return (
+                      <tr
+                        key={z.id}
+                        id={`zona-${z.codigo || z.id}`}
+                        className={`border-t ${
+                          isHighlighted
+                            ? "bg-blue-100 ring-2 ring-blue-400"
+                            : "bg-white hover:bg-gray-50"
+                        }`}
+                        onClick={(e) => {
+                          // Limpiar el resaltado al hacer clic en cualquier zona
+                          if (highlightedZonaCodigo) setHighlightedZonaCodigo(null);
+                          e.stopPropagation(); // Evitar propagación de eventos de clic
+                        }}
+                        style={{ contain: 'layout style paint' }}
+                      >
+                        <td className="px-3 py-2">{z.area || "—"}</td>
+                        <td className="px-3 py-2">{z.codigo || "—"}</td>
+                        <td className="px-3 py-2">{z.nombre}</td>
 
                       {isAdmin ? (
                         <td className="px-3 py-2 text-right">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={(e) => e.stopPropagation()} // Prevenir propagación
+                              >
                                 <MoreHorizontal className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
@@ -386,7 +547,7 @@ export function ZonasPageClient() {
                               <DropdownMenuItem onClick={() => handleEditZona(z)}>
                                 Editar
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleDeleteZona(z)}>
+                              <DropdownMenuItem onClick={() => setDeleteTarget(z)}>
                                 Eliminar
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleOpenMantenimientos(z)}>
@@ -400,14 +561,18 @@ export function ZonasPageClient() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleOpenMantenimientos(z)}
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevenir propagación
+                              handleOpenMantenimientos(z);
+                            }}
                           >
                             Mantenimientos
                           </Button>
                         </td>
                       )}
-                    </tr>
-                  ))}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -417,14 +582,14 @@ export function ZonasPageClient() {
         <TabsContent value="LOCATIVO" className="mt-4">
           {loadingZonas ? (
             <p className="text-sm text-muted-foreground">Cargando zonas...</p>
-          ) : zonas.length === 0 ? (
+          ) : filteredZonas.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No hay zonas registradas para este tipo/área.
             </p>
           ) : (
-            <div className="rounded-md border bg-green-50">
+            <div className="rounded-md border bg-green-50 max-h-[600px] overflow-y-auto overscroll-contain scroll-smooth">
               <table className="w-full text-sm">
-                <thead className="bg-green-50 -green-700">
+                <thead className="bg-green-50 text-green-700">
                   <tr>
                     <th className="px-3 py-2 text-left">Área</th>
                     <th className="px-3 py-2 text-left">Código</th>
@@ -433,51 +598,75 @@ export function ZonasPageClient() {
                   </tr>
                 </thead>
                 <tbody>
-                  {zonas.map((z) => (
-                    <tr key={z.id} className="border-t bg-white">
-                      <td className="px-3 py-2">{z.area || "—"}</td>
-                      <td className="px-3 py-2">{z.codigo || "—"}</td>
-                      <td className="px-3 py-2">{z.nombre}</td>
+                  {filteredZonas.map((z) => {
+                    const isHighlighted = highlightedZonaCodigo && (z.codigo === highlightedZonaCodigo || z.id === highlightedZonaCodigo);
+                    return (
+                      <tr
+                        key={z.id}
+                        id={`zona-${z.codigo || z.id}`}
+                        className={`border-t ${
+                          isHighlighted
+                            ? "bg-green-100 ring-2 ring-green-400"
+                            : "bg-white hover:bg-gray-50"
+                        }`}
+                        onClick={(e) => {
+                          // Limpiar el resaltado al hacer clic en cualquier zona
+                          if (highlightedZonaCodigo) setHighlightedZonaCodigo(null);
+                          e.stopPropagation(); // Evitar propagación de eventos de clic
+                        }}
+                        style={{ contain: 'layout style paint' }}
+                      >
+                        <td className="px-3 py-2">{z.area || "—"}</td>
+                        <td className="px-3 py-2">{z.codigo || "—"}</td>
+                        <td className="px-3 py-2">{z.nombre}</td>
 
-                      {isAdmin ? (
-                        <td className="px-3 py-2 text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleEditZona(z)}>
-                                Editar
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleDeleteZona(z)}>
-                                Eliminar
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleOpenMantenimientos(z)}>
-                                Mantenimientos
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </td>
-                      ) : (
-                        <td className="px-3 py-2 text-right">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleOpenMantenimientos(z)}
-                          >
-                            Mantenimientos
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
+                        {isAdmin ? (
+                          <td className="px-3 py-2 text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={(e) => e.stopPropagation()} // Prevenir propagación
+                                >
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleEditZona(z)}>
+                                  Editar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setDeleteTarget(z)}>
+                                  Eliminar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleOpenMantenimientos(z)}>
+                                  Mantenimientos
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </td>
+                        ) : (
+                          <td className="px-3 py-2 text-right">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation(); // Prevenir propagación
+                                handleOpenMantenimientos(z);
+                              }}
+                            >
+                              Mantenimientos
+                            </Button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
-        </TabsContent>
+        </TabsContent> 
       </Tabs>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -493,7 +682,14 @@ export function ZonasPageClient() {
               <Label htmlFor="zona-tipo">Tipo</Label>
               <Select
                 value={tipo}
-                onValueChange={(value) => setTipo(value as ZonaTipo)}
+                onValueChange={(value) => {
+                  setTipo(value as ZonaTipo);
+                  // When changing the type, reset the area selection to avoid conflicts
+                  // between areas that exist in one type but not the other
+                  if (!editingZona) {
+                    setAreaInput("");
+                  }
+                }}
                 disabled={!!editingZona}
               >
                 <SelectTrigger id="zona-tipo">
@@ -519,13 +715,13 @@ export function ZonasPageClient() {
                 }}
               >
                 <SelectTrigger id="zona-area">
-                  <SelectValue placeholder="Selecciona un área (o déjalo vacío)" />
+                  <SelectValue placeholder="Selecciona un área" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" side="bottom" className="max-h-[300px]">
                   <SelectItem value="NONE">Seleccionar área</SelectItem>
                   {areasForTipo.map((a) => (
                     <SelectItem key={a} value={a}>
-                      {tipo === "LOCATIVO" ? toTitleCase(a) : a}
+                      {a}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -539,7 +735,11 @@ export function ZonasPageClient() {
                 placeholder=""
                 value={codigo}
                 onChange={(e) => setCodigo(e.target.value)}
+                className={codigoDuplicado ? "border-red-500 focus-visible:ring-red-500" : ""}
               />
+              {codigoDuplicado && (
+                <p className="text-xs text-red-500">Ya existe una zona con este código.</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -563,12 +763,48 @@ export function ZonasPageClient() {
             >
               Cancelar
             </Button>
-            <Button type="button" onClick={handleSaveZona} disabled={saving}>
-              {saving ? "Guardando..." : "Guardar zona"}
+            <Button type="button" onClick={handleSaveZona} disabled={saving || codigoDuplicado}>
+              {saving ? "Guardando..." : codigoDuplicado ? "Código duplicado" : "Guardar zona"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {deleteTarget && (
+        <Dialog
+          open={!!deleteTarget}
+          onOpenChange={(open) => !open && setDeleteTarget(null)}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Eliminar zona</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              ¿Seguro que deseas eliminar la zona{" "}
+              <span className="font-semibold">"{deleteTarget.nombre}"</span>?
+              Esta acción no se puede deshacer.
+            </p>
+            <DialogFooter className="mt-4">
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleteLoading}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="destructive"
+                type="button"
+                onClick={performDeleteZona}
+                disabled={deleteLoading}
+              >
+                {deleteLoading ? "Eliminando..." : "Eliminar"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+      
     </div>
   );
 }

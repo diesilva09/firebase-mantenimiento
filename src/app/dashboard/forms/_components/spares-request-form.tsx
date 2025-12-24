@@ -19,7 +19,7 @@ const formSchema = z.object({
   tecnico: z.string().min(1, "Selecciona o escribe el técnico solicitante."),
 })
 
-type EquipmentLookup = { codigo: string; nombre: string }
+type EquipmentLookup = { codigo: string; nombre: string; area?: string | null; linea?: string | null }
 
 export function SparesRequestForm() {
   const { toast } = useToast()
@@ -47,7 +47,12 @@ export function SparesRequestForm() {
       const parsed = JSON.parse(raw) as any[]
       const mapped: EquipmentLookup[] = parsed
         .filter((e) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
-        .map((e) => ({ codigo: e.codigo, nombre: e.nombre }))
+        .map((e) => ({
+          codigo: e.codigo,
+          nombre: e.nombre,
+          area: e.area ?? null,
+          linea: e.linea ?? null,
+        }))
       setEquipos(mapped)
     } catch (e) {
       console.warn("No se pudo cargar la lista de equipos para autocompletar", e)
@@ -70,12 +75,20 @@ export function SparesRequestForm() {
     setIsLoading(true)
     
     try {
+      // Asegurar que en la BD se guarde solo el código limpio del equipo
+      const codigoEquipo = values.maquina.split(' - ')[0].trim()
+
+      const payload = {
+        ...values,
+        maquina: codigoEquipo,
+      }
+
       const response = await fetch('/api/spares-requests', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(values),
+        body: JSON.stringify(payload),
       })
 
       const result = await response.json()
@@ -165,17 +178,24 @@ export function SparesRequestForm() {
                     <button
                       type="button"
                       key={e.codigo}
-                      className="flex w-full items-start gap-2 px-2 py-1.5 text-left hover:bg-accent"
+                      className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
                       onMouseDown={(ev) => {
                         ev.preventDefault()
-                        const label = `${e.codigo} - ${e.nombre}`
+                        const areaText = e.area ?? "Sin área"
+                        const lineaText = e.linea ?? "Sin línea"
+                        const label = `${e.codigo} - ${areaText}${e.linea ? ` - ${lineaText}` : ""} - ${e.nombre}`
+                        // Mostrar en el input el label completo (código - área - línea - equipo)
                         setMaquinaQuery(label)
                         field.onChange(label)
                         setShowMaquinaSuggestions(false)
                       }}
                     >
                       <span className="font-medium">{e.codigo}</span>
-                      <span className="text-[11px] text-muted-foreground">{e.nombre}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {e.area ?? "Sin área"}
+                        {e.linea ? ` • ${e.linea}` : ""}
+                        {` • ${e.nombre}`}
+                      </span>
                     </button>
                   ))}
                 </div>

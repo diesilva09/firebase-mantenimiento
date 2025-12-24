@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 
 import Link from "next/link"
 import { useSearchParams, useRouter } from "next/navigation"
@@ -19,16 +19,17 @@ import { useToast } from "@/hooks/use-toast"
 import { useUser } from '@/firebase/auth/use-user'
 import { useEquipos } from '@/hooks/use-equipos' 
 import { useDashboardSearch, SearchSuggestion } from '@/context/dashboard-search-context'
+import { EquipmentDetailModal } from "@/components/equipment-detail-modal"
 
 const equipmentSchema = z.object({
-  codigo: z.string().min(1, "Requerido"),
-  version: z.string().optional(),
-  fechaImplementacion: z.string().optional(),
-  nombre: z.string().min(1, "Requerido"),
-  marca: z.string().optional(),
-  modelo: z.string().optional(),
-  fabricante: z.string().optional(),
-  fechaAdquisicion: z.string().optional(),
+  codigo: z.string().min(1, "El código es requerido").max(50, "El código es muy largo"),
+  version: z.string().max(20, "La versión es muy larga").optional(),
+  fechaImplementacion: z.string().regex(/^\d{4}-\d{2}-\d{2}$|^\s*$|^$/, "Formato de fecha inválido (AAAA-MM-DD)").optional(),
+  nombre: z.string().min(1, "El nombre es requerido").max(200, "El nombre es muy largo"),
+  marca: z.string().max(100, "La marca es muy larga").optional(),
+  modelo: z.string().max(100, "El modelo es muy largo").optional(),
+  fabricante: z.string().max(100, "El fabricante es muy largo").optional(),
+  fechaAdquisicion: z.string().regex(/^\d{4}-\d{2}-\d{2}$|^\s*$|^$/, "Formato de fecha inválido (AAAA-MM-DD)").optional(),
   image: z.any().optional(),
   area: z.enum([
     "Conservas",
@@ -39,16 +40,17 @@ const equipmentSchema = z.object({
     "PTAR",
     "Servicios de Apoyo",
     "Bodega",
-  ]).optional(),
-  linea: z.string().optional(),
-  // especificaciones tecnicas
-  capacidad: z.string().optional(),
-  amperaje: z.string().optional(),
-  potencia: z.string().optional(),
-  voltaje: z.string().optional(),
-  rpm: z.string().optional(),
-  magnitudMedida: z.string().optional(),
-  attachmentsUrl: z.string().optional(),
+    "Otros",
+  ]).or(z.literal("")).optional(),
+  linea: z.string().max(50, "La línea es muy larga").optional(),
+  capacidad: z.string().max(50, "La capacidad es muy larga").optional(),
+  amperaje: z.string().regex(/^[\d.]+\s*.*$|^\s*$|^$/, "Formato inválido para amperaje").optional(),
+  potencia: z.string().max(50, "La potencia es muy larga").optional(),
+  voltaje: z.string().regex(/^[\d.]+\s*.*$|^\s*$|^$/, "Formato inválido para voltaje").optional(),
+  rpm: z.string().regex(/^\d+.*$|^\s*$|^$/, "Formato inválido para RPM").optional(),
+  magnitudMedida: z.string().max(50, "La magnitud medida es muy larga").optional(),
+  estado: z.enum(["Operativo", "En mantenimiento", "Fuera de servicio"]).optional(),
+  attachmentsUrl: z.string().optional().nullable(),
 })
 
 type EquipmentForm = z.infer<typeof equipmentSchema>
@@ -78,20 +80,41 @@ export default function EquiposPage() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [checkingAdmin, setCheckingAdmin] = useState(true)
 
-  const { equipos, createEquipo, updateEquipo, deleteEquipo } = useEquipos()
+  const { equipos, loading: equiposLoading, createEquipo, updateEquipo, deleteEquipo } = useEquipos()
+
+  // Manejo de errores
+  const [error, setError] = useState<string | null>(null)
 
   // Búsqueda global desde el header (solo para sugerencias, no para filtrar la lista)
   const { /* query, */ setSuggestions } = useDashboardSearch()
 
-  // Registrar sugerencias globales para equipos (código + nombre)
+  // Registrar sugerencias globales para equipos (código + nombre + otros campos)
   useEffect(() => {
-    const items: SearchSuggestion[] = equipos.map((e) => ({
-      id: e.id,
-      label: `${e.codigo} - ${e.nombre}`,
-      type: 'equipo',
-      // Desde el buscador global vamos a la vista de listado y resaltamos el equipo
-      route: `/dashboard/equipos?view=list&selectedCodigo=${encodeURIComponent(e.codigo)}`,
-    }));
+    const items: SearchSuggestion[] = equipos.map((e) => {
+      const areaPart = e.area ? ` - ${e.area}` : ""
+      const lineaPart = e.linea ? ` - ${e.linea}` : ""
+      const label = `${e.codigo}${areaPart}${lineaPart} - ${e.nombre}`
+
+      // Campos adicionales para mejorar la búsqueda
+      const searchTerms = [
+        e.codigo,
+        e.nombre,
+        e.area || '',
+        e.linea || '',
+        e.marca || '',
+        e.modelo || '',
+        e.estado || ''
+      ].filter(Boolean).join(' ');
+
+      return {
+        id: e.id,
+        label,
+        type: 'equipo',
+        searchTerms, // Campo adicional para mejorar la búsqueda
+        // Desde el buscador global vamos a la vista de listado y resaltamos el equipo
+        route: `/dashboard/equipos?view=list&selectedCodigo=${encodeURIComponent(e.codigo)}`,
+      }
+    });
     setSuggestions(items);
   }, [equipos, setSuggestions])
 
@@ -102,29 +125,43 @@ export default function EquiposPage() {
       setCheckingAdmin(true)
 
       try {
-        // 1) Primero, usar bandera de localStorage (puesta en el login)
-        if (typeof window !== 'undefined') {
-          const localFlag = localStorage.getItem('isAdmin')
-          const localEmail = localStorage.getItem('userEmail')
+        if (user) {
+          // Validar rol desde backend para mayor seguridad
+          const response = await fetch('/api/auth/role', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              email: user.email,
+              uid: user.uid,
+            }),
+          });
 
-          if (localFlag === 'true') {
-            if (mounted) setIsAdmin(true)
-            setCheckingAdmin(false)
-            return
-          }
+          if (response.ok) {
+            const roleData = await response.json();
+            if (mounted) setIsAdmin(roleData.isAdmin);
+          } else {
+            // Fallback a verificación local si la API falla
+            const email = user.email?.toLowerCase().trim()
+            if (email) {
+              const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
+                .split(',')
+                .map((s) => s.trim().toLowerCase())
+                .filter(Boolean)
 
-          if (user && localEmail && user.email === localEmail) {
-            if (localFlag === 'true') {
-              if (mounted) setIsAdmin(true)
-            } else if (localFlag === 'false') {
+              const isEnvAdmin = adminEnv.includes(email)
+              if (mounted) setIsAdmin(isEnvAdmin)
+            } else {
               if (mounted) setIsAdmin(false)
             }
-            setCheckingAdmin(false)
-            return
           }
+        } else {
+          if (mounted) setIsAdmin(false)
         }
-
-        // 2) Si no hay bandera, usar NEXT_PUBLIC_ADMIN_EMAILS
+      } catch (error) {
+        console.error('Error verificando rol de usuario:', error);
+        // Fallback seguro
         const email = user?.email?.toLowerCase().trim()
         if (email) {
           const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
@@ -134,11 +171,6 @@ export default function EquiposPage() {
 
           const isEnvAdmin = adminEnv.includes(email)
           if (mounted) setIsAdmin(isEnvAdmin)
-
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('isAdmin', isEnvAdmin ? 'true' : 'false')
-            localStorage.setItem('userEmail', user?.email || '')
-          }
         } else {
           if (mounted) setIsAdmin(false)
         }
@@ -164,7 +196,7 @@ export default function EquiposPage() {
       fabricante: "",
       fechaAdquisicion: "",
       image: undefined,
-      area: "Conservas",
+      area: "",
       linea: "",
       capacidad: "",
       amperaje: "",
@@ -172,13 +204,20 @@ export default function EquiposPage() {
       voltaje: "",
       rpm: "",
       magnitudMedida: "",
+      estado: "Operativo",
       attachmentsUrl: "",
     },
   })
 
   const { toast } = useToast()
 
-  const [view, setView] = useState<"form" | "list">(initialView)
+  const [view, setView] = useState<"form" | "list">(() => {
+    if (typeof window !== "undefined") {
+      const saved = window.localStorage.getItem("equiposView")
+      if (saved === "form" || saved === "list") return saved
+    }
+    return initialView
+  })
 
   const [filter, setFilter] = useState<
     | "all"
@@ -190,8 +229,19 @@ export default function EquiposPage() {
     | "PTAR"
     | "Servicios de Apoyo"
     | "Bodega"
+    | "Otros"
   >("all")
+
+  // Filtros adicionales
+  const [estadoFilter, setEstadoFilter] = useState<string>("all") // "all", "Operativo", "En mantenimiento", "Fuera de servicio"
   const [editingId, setEditingId] = useState<string | null>(null)
+
+  // Estado para rastrear si hay un código duplicado
+  const [codigoDuplicado, setCodigoDuplicado] = useState<boolean>(false)
+
+  // Estado para rastrear si hay una operación en curso
+  const [operacionEnCurso, setOperacionEnCurso] = useState<boolean>(false)
+
 
   const AREAS = [
     "Conservas",
@@ -202,7 +252,9 @@ export default function EquiposPage() {
     "PTAR",
     "Servicios de Apoyo",
     "Bodega",
+    "Otros",
   ] as const
+
   const AREA_LABELS: Record<string,string> = {
     Conservas: 'Conservas',
     Etiquetado: 'Etiquetado',
@@ -212,13 +264,70 @@ export default function EquiposPage() {
     PTAR: 'PTAR',
     'Servicios de Apoyo': 'Servicios de Apoyo',
     Bodega: 'Bodega',
+    Otros: 'Otros',
   }
+
+  const KNOWN_AREA_KEYS = AREAS.filter((a) => a !== 'Otros').map((a) => a.toLowerCase().trim())
 
   const [expandedAreas, setExpandedAreas] = useState<Record<string, boolean>>(() => {
     const obj: Record<string, boolean> = {}
-    AREAS.forEach(a => obj[a] = true)
+    AREAS.forEach((a) => {
+      // Todas las áreas empiezan ocultas por defecto
+      obj[a] = false
+    })
     return obj
   })
+
+  // Estados para optimización de rendimiento
+  const [visibleAreas, setVisibleAreas] = useState<Set<string>>(new Set())
+  const areaRefs = useRef<Record<string, HTMLDivElement | null>>({})
+
+  const registerAreaRef = useCallback((area: string) => (element: HTMLDivElement | null) => {
+    areaRefs.current[area] = element;
+  }, []);
+
+  // Detectar áreas visibles con Intersection Observer
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') {
+      // Si no hay soporte para IntersectionObserver, mostrar todas las áreas
+      setVisibleAreas(new Set(AREAS));
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.target instanceof HTMLElement) {
+            const area = entry.target.dataset.area;
+            if (area) {
+              setVisibleAreas((prev) => {
+                const newSet = new Set(prev);
+                if (entry.isIntersecting) {
+                  newSet.add(area);
+                } else {
+                  newSet.delete(area);
+                }
+                return newSet;
+              });
+            }
+          }
+        });
+      },
+      { rootMargin: '50px 0px' } // Cargar 50px antes de que entre en la vista
+    );
+
+    AREAS.forEach((a) => {
+      const element = areaRefs.current[a];
+      if (element) {
+        observer.observe(element);
+      }
+    });
+
+    // Observar áreas inicialmente visibles
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   function toggleArea(a: string) {
     setExpandedAreas(prev => ({ ...prev, [a]: !prev[a] }))
@@ -252,12 +361,14 @@ export default function EquiposPage() {
       'Selladora pedal',
     ],
     Medicion: [
-      'Laboratorio Micropesaje',
-      'Laboratorio Materia Prima',
-      'Planta',
+      'Laboratorio planta',
+      'Laboratorio Calidad',
+      'Planta Preparacion',
+      'Planta Envasado',
+      'Laboratorio PTAR',
     ],
     PTAR: [
-      'Laboratorios',
+      'Tratamiento Agua',
     ],
     'Servicios de Apoyo': [
       'Cuarto Maquinas',
@@ -270,10 +381,48 @@ export default function EquiposPage() {
     ],
   }
 
-  const [lineFilters, setLineFilters] = useState<Record<string,string>>(() => ({}))
+  const [lineFilters, setLineFilters] = useState<Record<string, string>>(() => ({}))
   function setLineFilter(area: string, value: string) {
-    setLineFilters(prev => ({ ...prev, [area]: value }))
+    setLineFilters((prev) => ({ ...prev, [area]: value }))
   }
+
+  // Código del equipo que debe aparecer resaltado (por ejemplo, cuando venimos del buscador global).
+  // Usamos este estado en lugar de depender solo del parámetro de la URL para que el resaltado
+  // dure más tiempo y no desaparezca inmediatamente después del scroll inicial.
+  const [highlightedCodigo, setHighlightedCodigo] = useState<string | null>(null)
+
+  // Cargar preferencias de vista, filtro de área y líneas desde localStorage (solo una vez)
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      const savedFilter = window.localStorage.getItem("equiposFilter") as string | null
+      if (savedFilter && (savedFilter === "all" || AREAS.includes(savedFilter as any))) {
+        setFilter(savedFilter as any)
+      }
+
+      const rawLines = window.localStorage.getItem("equiposLineFilters")
+      if (rawLines) {
+        const parsed = JSON.parse(rawLines) as Record<string, string> | null
+        if (parsed && typeof parsed === "object") {
+          setLineFilters(parsed)
+        }
+      }
+    } catch {
+      // ignorar errores de parseo
+    }
+  }, [])
+
+  // Guardar preferencias de vista, filtro y líneas en localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      window.localStorage.setItem("equiposView", view)
+      window.localStorage.setItem("equiposFilter", filter)
+      window.localStorage.setItem("equiposLineFilters", JSON.stringify(lineFilters))
+    } catch {
+      // ignorar errores de escritura
+    }
+  }, [view, filter, lineFilters])
 
   // Equipo que se muestra en el modal de ficha técnica
   const [modalEquipment, setModalEquipment] = useState<UiStoredEquipment | null>(null)
@@ -283,12 +432,70 @@ export default function EquiposPage() {
   const [menuForCode, setMenuForCode] = useState<string | null>(null)
   // Referencia al contenedor del menú de opciones para poder cerrar al hacer clic fuera
   const menuRef = useRef<HTMLDivElement | null>(null)
+  // Estado para rastrear la carga de anexos
+  const [loadingAnexos, setLoadingAnexos] = useState<string | null>(null)
+
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const imageFile = form.watch("image")
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    const fileList = imageFile as FileList | undefined;
+    
+    if (fileList && fileList.length > 0) {
+      const file = fileList[0];
+      objectUrl = URL.createObjectURL(file);
+      setImagePreview(objectUrl);
+    } else {
+      setImagePreview(null);
+    }
+
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [imageFile]);
+
+
   const watchedArea = form.watch("area")
+  const watchedCodigo = form.watch("codigo")
+
+  // Validación en vivo: evitar códigos de equipo duplicados
+  useEffect(() => {
+    const raw = (watchedCodigo || "").toString().trim().toLowerCase()
+
+    // Si no hay código, limpiar error y salir
+    if (!raw) {
+      form.clearErrors("codigo")
+      setCodigoDuplicado(false)
+      return
+    }
+
+    const hasDuplicate = equipos.some((e) => {
+      const eqCodigo = (e.codigo || "").toString().trim().toLowerCase()
+      // Si estamos editando, permitimos el mismo código en el mismo id
+      if (editingId && e.id === editingId) return false
+      return eqCodigo === raw
+    })
+
+    if (hasDuplicate) {
+      form.setError("codigo", {
+        type: "manual",
+        message: "Ya existe un equipo con este código.",
+      })
+      setCodigoDuplicado(true)
+    } else {
+      form.clearErrors("codigo")
+      setCodigoDuplicado(false)
+    }
+  }, [watchedCodigo, equipos, editingId, form])
 
   // Si venimos desde el buscador global con un código seleccionado,
   // asegurarnos de expandir el área y la línea correctas para que el equipo sea visible.
   useEffect(() => {
     if (!selectedCodigoFromQuery) return
+
     if (!equipos || equipos.length === 0) return
 
     const target = equipos.find((e) => e.codigo === selectedCodigoFromQuery)
@@ -307,6 +514,10 @@ export default function EquiposPage() {
         [target.area]: target.linea as string,
       }))
     }
+
+    // Marcar este equipo como resaltado para que el borde azul se mantenga visible
+    // incluso después de limpiar el parámetro de la URL.
+    setHighlightedCodigo(target.codigo)
   }, [selectedCodigoFromQuery, equipos])
 
   // Hacer scroll automático hasta la tarjeta del equipo buscado en la vista de listado
@@ -321,6 +532,7 @@ export default function EquiposPage() {
 
     const tryScroll = () => {
       const el = document.getElementById(elementId)
+
       if (!el) return false
 
       el.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -364,19 +576,82 @@ export default function EquiposPage() {
   }, [menuForCode])
 
   async function onSubmit(values: EquipmentForm) {
-    if (editingId) {
-      const success = await updateEquipo(editingId, values)
-      if (success) {
-        setEditingId(null)
-        form.reset()
-        setView('list')
+    // Validar que no haya código duplicado antes de enviar
+    if (codigoDuplicado && !editingId) {
+      toast({
+        title: "Error",
+        description: "No se puede guardar un equipo con código duplicado.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Activar indicador de operación en curso
+    setOperacionEnCurso(true);
+
+    // Mostrar feedback visual al usuario
+    toast({
+      title: editingId ? "Actualizando equipo..." : "Guardando equipo...",
+      description: "Por favor espere mientras procesamos su solicitud."
+    });
+
+    // Normalizar datos: convertir string vacío de área a undefined para evitar errores
+    const payload = {
+      ...values,
+      area: values.area === "" ? undefined : values.area,
+      fechaImplementacion: values.fechaImplementacion === "" ? null : values.fechaImplementacion,
+      fechaAdquisicion: values.fechaAdquisicion === "" ? null : values.fechaAdquisicion,
+    };
+
+    try {
+      if (editingId) {
+        // Llamar a la actualización real
+        const success = await updateEquipo(editingId, payload as any)
+        if (success) {
+          setEditingId(null)
+          form.reset()
+          setView('list')
+
+          toast({
+            title: "Equipo actualizado",
+            description: "El equipo se ha actualizado correctamente."
+          });
+        } else {
+          toast({
+            title: "Error",
+            description: "No se pudo actualizar el equipo, por favor inténtelo de nuevo.",
+            variant: "destructive"
+          })
+        }
+      } else {
+        // Llamar a la creación real
+        const success = await createEquipo(payload as any)
+        if (success) {
+          form.reset()
+          setView('list')
+
+          toast({
+            title: "Equipo creado",
+            description: "El equipo se ha creado correctamente."
+          });
+        } else {
+          toast({
+            title: "Error",
+            description: "No se pudo crear el equipo, por favor inténtelo de nuevo.",
+            variant: "destructive"
+          })
+        }
       }
-    } else {
-      const success = await createEquipo(values)
-      if (success) {
-        form.reset()
-        setView('list')
-      }
+    } catch (error) {
+      console.error('Error en la operación:', error);
+      toast({
+        title: "Error de red",
+        description: error instanceof Error ? error.message : "Ocurrió un error de red, por favor inténtelo de nuevo.",
+        variant: "destructive"
+      });
+    } finally {
+      // Desactivar indicador de operación en curso
+      setOperacionEnCurso(false);
     }
   }
 
@@ -387,10 +662,69 @@ export default function EquiposPage() {
           <h1 className="text-2xl font-semibold">Equipos</h1>
           <p className="mt-1 text-sm text-muted-foreground">Registrar un equipo ver el listado por area y linea</p>
         </div>
-        <div className="flex gap-2 self-start sm:self-auto">
-          <Button variant={view === "form" ? "default" : "ghost"} onClick={() => setView("form")} disabled={!isAdmin}>Registrar</Button>
-          <Button variant={view === "list" ? "default" : "ghost"} onClick={() => setView("list")}>Listado</Button>
+        <div className="flex flex-col gap-3 w-full sm:w-auto">
+          <div className="flex flex-col sm:flex-row gap-2 w-full">
+            <Button
+              variant={view === "form" ? "default" : "ghost"}
+              disabled={!isAdmin}
+              className="w-full sm:w-auto"
+              onClick={() => {
+                // Al entrar a "Registrar" siempre preparamos el formulario para un equipo nuevo
+                setEditingId(null)
+                form.reset({
+                  codigo: "",
+                  version: "",
+                  fechaImplementacion: "",
+                  nombre: "",
+                  marca: "",
+                  modelo: "",
+                  fabricante: "",
+                  fechaAdquisicion: "",
+                  image: undefined,
+                  area: "",
+                  linea: "",
+                  capacidad: "",  
+                  amperaje: "",
+                  potencia: "",
+                  voltaje: "",
+                  rpm: "",
+                  magnitudMedida: "",
+                  estado: "Operativo",
+                  attachmentsUrl: "",
+                })
+                setView("form")
+              }}
+            >
+              Registrar
+            </Button>
+            <Button
+              variant={view === "list" ? "default" : "ghost"}
+              onClick={() => setView("list")}
+              className="w-full sm:w-auto"
+            >
+              Listado
+            </Button>
+          </div>
+
+          {view === "list" && (
+            <div className="flex flex-col gap-2 w-full">
+              <div className="flex flex-col gap-1 w-full">
+                <span className="text-sm font-medium text-muted-foreground text-left">Filtrar por estado:</span>
+                <select
+                  className="h-9 rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 w-full"
+                  value={estadoFilter}
+                  onChange={(e) => setEstadoFilter(e.target.value)}
+                >
+                  <option value="all">Todos los estados</option>
+                  <option value="Operativo">Operativo</option>
+                  <option value="En mantenimiento">En mantenimiento</option>
+                  <option value="Fuera de servicio">Fuera de servicio</option>
+                </select>
+              </div>
+            </div>
+          )}
         </div>
+       
       </div>
 
       <div className="mt-6">
@@ -399,11 +733,14 @@ export default function EquiposPage() {
             <div className="rounded-md border bg-card p-3 sm:p-4">
               <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <FormItem>
                       <FormLabel>Codigo</FormLabel>
                       <FormControl>
-                        <Input {...form.register("codigo")} />
+                        <Input
+                          {...form.register("codigo")}
+                          className={`${codigoDuplicado && !editingId ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -468,9 +805,25 @@ export default function EquiposPage() {
                       <FormLabel>Área</FormLabel>
                       <FormControl>
                         <select
-                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base focus-visible:outline-none"
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                           {...form.register("area")}
+                          onKeyDown={(e) => {
+                            // Prevenir que el scroll del mouse afecte la selección accidentalmente
+                            if (e.key === 'Tab' || e.key === 'Enter' || e.key === 'Escape' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                              return; // Permitir teclas de navegación estándar
+                            }
+                            e.stopPropagation(); // Detener propagación para evitar problemas de scroll
+                          }}
+                          onMouseDown={(e) => {
+                            // Prevenir el scroll en el contenedor padre
+                            e.stopPropagation();
+                          }}
+                          onWheel={(e) => {
+                            // Prevenir que el scroll del mouse afecte la interfaz global
+                            e.stopPropagation();
+                          }}
                         >
+                          <option value="">Seleccione un área</option>
                           <option value="Conservas">Conservas</option>
                           <option value="Etiquetado">Etiquetado</option>
                           <option value="Salsas">Salsas</option>
@@ -479,6 +832,7 @@ export default function EquiposPage() {
                           <option value="PTAR">PTAR</option>
                           <option value="Servicios de Apoyo">Servicios de Apoyo</option>
                           <option value="Bodega">Bodega</option>
+                          <option value="Otros">Otros</option>
                         </select>
                       </FormControl>
                       <FormMessage />
@@ -507,27 +861,51 @@ export default function EquiposPage() {
                     <FormItem>
                       <FormLabel>Imagen del equipo</FormLabel>
                       <FormControl>
-                        <Input type="file" accept="image/*" {...form.register("image")} />
+                        <Input
+                          type="file"
+                          accept="image/*"
+                          {...form.register("image", {
+                            validate: (value) => {
+                              if (value && value[0]) {
+                                const file = value[0];
+
+                                // Validar tamaño (máximo 5MB)
+                                if (file.size > 5 * 1024 * 1024) {
+                                  return "La imagen debe ser menor a 5MB";
+                                }
+
+                                // Validar tipo
+                                if (!file.type.startsWith('image/')) {
+                                  return "Por favor seleccione un archivo de imagen válido";
+                                }
+                              }
+                              return true;
+                            }
+                          })}
+                        />
                       </FormControl>
                       <FormMessage />
 
-                      {(() => {
-                        const fileList = form.watch("image") as FileList | undefined
-                        if (fileList && fileList.length > 0) {
-                          const file = fileList[0]
-                          try {
-                            const url = URL.createObjectURL(file)
-                            return (
-                              <div className="mt-2">
-                                <img src={url} alt="preview" className="h-24 w-24 object-cover rounded-md border" />
-                              </div>
-                            )
-                          } catch (e) {
-                            return null
-                          }
-                        }
-                        return null
-                      })()}
+                      {imagePreview && (
+                        <div className="mt-2">
+                          <img src={imagePreview} alt="preview" className="h-24 w-24 object-cover rounded-md border" />
+                        </div>
+                      )}
+                    </FormItem>
+
+                    <FormItem>
+                      <FormLabel>Estado del equipo</FormLabel>
+                      <FormControl>
+                        <select
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base focus-visible:outline-none"
+                          {...form.register("estado")}
+                        >
+                          <option value="Operativo">Operativo</option>
+                          <option value="En mantenimiento">En mantenimiento</option>
+                          <option value="Fuera de servicio">Fuera de servicio</option>
+                        </select>
+                      </FormControl>
+                      <FormMessage />
                     </FormItem>
 
                     <FormItem>
@@ -545,7 +923,7 @@ export default function EquiposPage() {
                   <Separator className="my-2" />
 
                   <h2 className="text-lg font-medium">Especificaciones técnicas</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <FormItem>
                       <FormLabel>Capacidad</FormLabel>
                       <FormControl>
@@ -596,7 +974,21 @@ export default function EquiposPage() {
                   </div>
 
                   <div className="flex justify-end pt-2">
-                    <Button type="submit">Guardar equipo</Button>
+                    <Button
+                      type="submit"
+                      disabled={codigoDuplicado && !editingId || operacionEnCurso}
+                    >
+                      {operacionEnCurso ? (
+                        <div className="flex items-center">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          {editingId ? "Actualizando..." : "Guardando..."}
+                        </div>
+                      ) : codigoDuplicado && !editingId ? (
+                        "Código duplicado"
+                      ) : (
+                        "Guardar equipo"
+                      )}
+                    </Button>
                   </div>
                 </form>
               </Form>
@@ -611,31 +1003,83 @@ export default function EquiposPage() {
             </div>
           )
         ) : (
-          <div className="mx-auto">
+          <div
+            className="mx-auto"
+            onClick={() => {
+              // Cualquier clic general en la zona de listado limpia el resaltado automático
+              // del equipo buscado, para que no quede "pegado" después de interactuar.
+              if (highlightedCodigo) setHighlightedCodigo(null)
+            }}
+          >
+            {equiposLoading ? (
+              <div className="rounded-md border bg-card p-3 sm:p-4 text-sm text-muted-foreground flex items-center justify-center h-32">
+                <div className="flex flex-col items-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2"></div>
+                  <span>Cargando equipos...</span>
+                </div>
+              </div>
+            ) : (
             <div className="space-y-4">
               {AREAS.map((a) => {
-                const areaItems = equipos
-                  .filter(e => e.area === a)
+                const areaItems = equipos.filter((e) => {
+                  const eqArea = (e.area ?? "").toString().toLowerCase().trim()
+
+                  if (!eqArea) {
+                    return a === 'Otros'
+                  }
+
+                  // En "Otros" mostramos equipos cuya área no coincide con ninguna área conocida
+                  if (a === 'Otros') {
+                    return !KNOWN_AREA_KEYS.includes(eqArea)
+                  }
+
+                  const areaKey = a.toLowerCase().trim()
+                  return eqArea === areaKey
+                })
+
+                // Aplicar filtros adicionales
+                const filteredByAdvancedFilters = areaItems.filter((e) => {
+                  // Filtro por estado
+                  if (estadoFilter !== "all" && e.estado !== estadoFilter) return false
+
+                  return true
+                })
 
                 const isLineArea = Boolean(AREA_LINEAS[a])
-                const selectedLine = isLineArea ? (lineFilters[a] ?? '') : ''
+                const selectedLine = isLineArea ? (lineFilters[a] ?? "") : ""
                 const items = isLineArea
                   ? selectedLine
-                    ? areaItems.filter(e => e.linea === selectedLine)
-                    : []
-                  : areaItems
+                    ? filteredByAdvancedFilters.filter((e) => {
+                        const eqLine = (e.linea ?? "").toString().toLowerCase().trim()
+                        const lineKey = selectedLine.toLowerCase().trim()
+
+                        if (!lineKey) return true
+
+                        // Si estamos buscando un equipo específico que no tiene línea, también debe aparecer
+                        if (highlightedCodigo && e.codigo === highlightedCodigo && !eqLine) return true
+
+                        // Aceptar coincidencia exacta o que la linea contenga el texto seleccionado
+                        return eqLine === lineKey || eqLine.includes(lineKey)
+                      })
+                    : filteredByAdvancedFilters
+                  : filteredByAdvancedFilters
 
                 return (
-                  <div key={a} className="rounded-md border bg-card p-3">
+                  <div
+                    key={a}
+                    data-area={a}
+                    ref={registerAreaRef(a)}
+                    className="rounded-md border bg-card p-3"
+                  >
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-2">
-                      <div className="font-medium">
+                      <div className="font-medium text-sm">
                         {AREA_LABELS[a] ?? a}{" "}
-                        <span className="text-sm text-muted-foreground">({items.length})</span>
+                        <span className="text-xs text-muted-foreground">({items.length})</span>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center gap-2 w-full sm:w-auto">
                         {isLineArea && (
                           <select
-                            className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-xs focus-visible:outline-none"
+                            className="w-full sm:w-auto h-8 rounded-md border border-input bg-background px-2 py-1 text-xs focus-visible:outline-none"
                             value={selectedLine}
                             onChange={(e) => setLineFilter(a, e.target.value)}
                           >
@@ -647,54 +1091,96 @@ export default function EquiposPage() {
                             ))}
                           </select>
                         )}
-                        <Button size="sm" variant="ghost" onClick={() => toggleArea(a)}>{expandedAreas[a] ? 'Ocultar' : 'Ver'}</Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="w-full sm:w-auto"
+                          onClick={() => toggleArea(a)}
+                        >
+                          {expandedAreas[a] ? "Ocultar" : "Ver"}
+                        </Button>
                       </div>
                     </div>
 
                     {expandedAreas[a] && (
                       items.length === 0 ? (
                         <div className="rounded-md border bg-card p-3 sm:p-4 text-sm text-muted-foreground">
-                          {isLineArea && !selectedLine
-                            ? 'Selecciona una línea para ver los equipos.'
-                            : 'No hay equipos en esta área.'}
+                          No hay equipos en esta área.
                         </div>
                       ) : (
-                        <ul className="grid gap-3">
+                        <div className="max-h-[400px] overflow-y-auto pr-2 -mr-2 overscroll-contain">
+                          <ul className="grid gap-3">
                           {items.map((e, index) => {
-                            const isSelected = selectedCodigoFromQuery && e.codigo === selectedCodigoFromQuery
+                            const isSelected = highlightedCodigo && e.codigo === highlightedCodigo
                             return (
                               <li
                                 key={e.id}
                                 id={`equipo-${e.codigo}`}
                                 className={`relative flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 rounded-md border p-3 cursor-pointer hover:bg-accent/40 ${
-                                  isSelected ? 'border-blue-500 ring-2 ring-blue-300 bg-accent/40' : 'bg-card'
+                                  isSelected ? "border-blue-500 ring-2 ring-blue-300 bg-accent/40" : "bg-card"
                                 }`}
-                                onClick={() => {
-                                  setModalEquipment(e)
+                                onClick={(ev) => {
+                                  // Evitar que el clic burbujee al contenedor y solo abra el modal.
+                                  ev.stopPropagation()
+
+                                  // Buscar el equipo actualizado en la lista más reciente
+                                  const updatedEquipment = equipos.find(eq => eq.id === e.id)
+                                  
+                                  // Abrir el modal con la información del equipo
+                                  if (updatedEquipment) {
+                                    // Convertir StoredEquipment a UiStoredEquipment para el modal
+                                    setModalEquipment({
+                                      ...updatedEquipment,
+                                      area: updatedEquipment.area as any,
+                                    } as UiStoredEquipment)
+                                  }
+
+                                  // Una vez que el usuario interactúa con una tarjeta, limpiamos
+                                  // el resaltado automático.
+                                  if (highlightedCodigo) setHighlightedCodigo(null)
                                 }}
                               >
-                                <div className="h-20 w-20 sm:h-16 sm:w-16 shrink-0 overflow-hidden rounded-md bg-muted flex items-center justify-center">
+                                <div className="h-16 w-16 sm:h-20 sm:w-20 shrink-0 overflow-hidden rounded-md bg-muted flex items-center justify-center">
                                   {e.imageDataUrl ? (
                                     // eslint-disable-next-line @next/next/no-img-element
                                     <img src={e.imageDataUrl} alt={e.nombre} className="h-full w-full object-cover" />
                                   ) : (
-                                    <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">No imagen</div>
+                                    <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+                                      No imagen
+                                    </div>
                                   )}
                                 </div>
-                                <div className="flex-1">
+                                <div className="flex-1 min-w-0">
                                   <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-                                    <div>
-                                      <div className="font-medium">{e.nombre}</div>
-                                      <div className="text-sm text-muted-foreground">{e.codigo} • {e.marca} {e.modelo}</div>
-                                      {e.linea && (
-                                        <div className="text-xs text-muted-foreground">Línea: {e.linea}</div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="font-medium truncate">{e.nombre}</div>
+                                      <div className="text-xs sm:text-sm text-muted-foreground truncate">
+                                        {e.codigo} • {e.marca || 'Sin marca'} {e.modelo || ''}
+                                      </div>
+                                      {e.area && (
+                                        <div className="text-xs text-muted-foreground truncate">
+                                          Área: {e.area} {e.linea ? `• Línea: ${e.linea}` : ''}
+                                        </div>
                                       )}
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                      <div className="text-sm text-muted-foreground">{e.area}</div>
+                                    <div className="flex flex-col items-start sm:items-end gap-1 min-w-[120px]">
+                                      {(() => {
+                                        const estado = (e as any).estado || "Operativo"
+                                        let classes =
+                                          "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium mt-6 "
+                                        if (estado === "Operativo") classes += "bg-green-100 text-green-800"
+                                        else if (estado === "En mantenimiento") classes += "bg-yellow-100 text-yellow-800"
+                                        else classes += "bg-red-100 text-red-800"
+                                      
+                                        return <span className={classes}>{estado}</span>
+                                       
+                                      
+                                      })()}
                                     </div>
                                   </div>
-                                  <div className="mt-2 text-sm text-muted-foreground">Capacidad: {e.capacidad ?? '-'} • Potencia: {e.potencia ?? '-'}</div>
+                                  <div className="mt-2 text-sm text-muted-foreground">
+                                    Capacidad: {e.capacidad ?? "-"} • Potencia: {e.potencia ?? "-"}
+                                  </div>
                                 </div>
                                 <Button
                                   size="icon"
@@ -702,7 +1188,7 @@ export default function EquiposPage() {
                                   className="absolute right-2 top-2 h-7 w-7 text-muted-foreground"
                                   onClick={(ev) => {
                                     ev.stopPropagation()
-                                    setMenuForCode(prev => (prev === e.codigo ? null : e.codigo))
+                                    setMenuForCode((prev) => (prev === e.codigo ? null : e.codigo))
                                   }}
                                 >
                                   ⋮
@@ -727,27 +1213,28 @@ export default function EquiposPage() {
                                             onClick={(ev) => {
                                               ev.stopPropagation()
                                               setMenuForCode(null)
-                                              setView('form')
+                                              setView("form")
                                               setEditingId(e.id)
                                               form.reset({
                                                 codigo: e.codigo,
-                                                version: e.version ?? '',
-                                                fechaImplementacion: e.fechaImplementacion ?? '',
+                                                version: e.version ?? null,
+                                                fechaImplementacion: e.fechaImplementacion ?? null,
                                                 nombre: e.nombre,
-                                                marca: e.marca ?? '',
-                                                modelo: e.modelo ?? '',
-                                                fabricante: e.fabricante ?? '',
-                                                fechaAdquisicion: e.fechaAdquisicion ?? '',
+                                                marca: e.marca ?? null,
+                                                modelo: e.modelo ?? null,
+                                                fabricante: e.fabricante ?? null,
+                                                fechaAdquisicion: e.fechaAdquisicion ?? null,
                                                 image: undefined,
-                                                area: e.area as any,
-                                                linea: e.linea ?? '',
-                                                capacidad: e.capacidad ?? '',
-                                                amperaje: e.amperaje ?? '',
-                                                potencia: e.potencia ?? '',
-                                                voltaje: e.voltaje ?? '',
-                                                rpm: e.rpm ?? '',
-                                                magnitudMedida: e.magnitudMedida ?? '',
-                                                attachmentsUrl: (e as any).attachmentsUrl ?? '',
+                                                area: e.area ?? "",
+                                                linea: e.linea ?? null,
+                                                capacidad: e.capacidad ?? null,
+                                                amperaje: e.amperaje ?? null,
+                                                potencia: e.potencia ?? null,
+                                                voltaje: e.voltaje ?? null,
+                                                rpm: e.rpm ?? null,
+                                                magnitudMedida: e.magnitudMedida ?? null,
+                                                estado: e.estado ?? "Operativo",
+                                                attachmentsUrl: e.attachmentsUrl ?? null,
                                               })
                                             }}
                                           >
@@ -771,6 +1258,14 @@ export default function EquiposPage() {
                                         className="block px-3 py-1.5 hover:bg-accent"
                                         onClick={(ev) => {
                                           ev.stopPropagation()
+                                          if (typeof window !== 'undefined') {
+                                            const params = new URLSearchParams(window.location.search)
+                                            params.set('view', 'list')
+                                            params.set('selectedCodigo', e.codigo)
+                                            const qs = params.toString()
+                                            const newUrl = qs ? `/dashboard/equipos?${qs}` : '/dashboard/equipos'
+                                            window.history.replaceState(null, '', newUrl)
+                                          }
                                           setMenuForCode(null)
                                         }}
                                       >
@@ -781,6 +1276,14 @@ export default function EquiposPage() {
                                         className="block px-3 py-1.5 hover:bg-accent"
                                         onClick={(ev) => {
                                           ev.stopPropagation()
+                                          if (typeof window !== 'undefined') {
+                                            const params = new URLSearchParams(window.location.search)
+                                            params.set('view', 'list')
+                                            params.set('selectedCodigo', e.codigo)
+                                            const qs = params.toString()
+                                            const newUrl = qs ? `/dashboard/equipos?${qs}` : '/dashboard/equipos'
+                                            window.history.replaceState(null, '', newUrl)
+                                          }
                                           setMenuForCode(null)
                                         }}
                                       >
@@ -791,6 +1294,14 @@ export default function EquiposPage() {
                                         className="block px-3 py-1.5 hover:bg-accent"
                                         onClick={(ev) => {
                                           ev.stopPropagation()
+                                          if (typeof window !== 'undefined') {
+                                            const params = new URLSearchParams(window.location.search)
+                                            params.set('view', 'list')
+                                            params.set('selectedCodigo', e.codigo)
+                                            const qs = params.toString()
+                                            const newUrl = qs ? `/dashboard/equipos?${qs}` : '/dashboard/equipos'
+                                            window.history.replaceState(null, '', newUrl)
+                                          }
                                           setMenuForCode(null)
                                         }}
                                       >
@@ -801,10 +1312,26 @@ export default function EquiposPage() {
                                         className="block px-3 py-1.5 hover:bg-accent"
                                         onClick={(ev) => {
                                           ev.stopPropagation()
+                                          setLoadingAnexos(e.codigo)
+                                          if (typeof window !== 'undefined') {
+                                            const params = new URLSearchParams(window.location.search)
+                                            params.set('view', 'list')
+                                            params.set('selectedCodigo', e.codigo)
+                                            const qs = params.toString()
+                                            const newUrl = qs ? `/dashboard/equipos?${qs}` : '/dashboard/equipos'
+                                            window.history.replaceState(null, '', newUrl)
+                                          }
                                           setMenuForCode(null)
                                         }}
                                       >
-                                        Anexos
+                                        {loadingAnexos === e.codigo ? (
+                                          <div className="flex items-center gap-2">
+                                            <div className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent"></div>
+                                            <span>Cargando...</span>
+                                          </div>
+                                        ) : (
+                                          "Anexos"
+                                        )}
                                       </Link>
                                     </div>
                                   </div>
@@ -813,37 +1340,39 @@ export default function EquiposPage() {
                             )}
                           )}
                         </ul>
+                        </div>
                       )
                     )}
                   </div>
                 )
               })}
             </div>
+            )}
           </div>
         )}
       </div>
-      {modalEquipment && (
-        <EquipmentDetailModal
-          equipment={modalEquipment}
-          onClose={() => setModalEquipment(null)}
-        />
-      )}
+
+      <EquipmentDetailModal
+        equipment={modalEquipment}
+        isOpen={!!modalEquipment}
+        onClose={() => setModalEquipment(null)}
+      /> 
 
       {isAdmin && deleteTarget && (
         <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Eliminar equipo</DialogTitle>
+              <DialogTitle>Confirmar eliminación</DialogTitle>
             </DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              ¿Seguro que deseas eliminar el equipo
-              {" "}
-              <span className="font-medium">
-                {deleteTarget.codigo} - {deleteTarget.nombre}
-              </span>
-              ? Esta acción eliminará también las órdenes de mantenimiento relacionadas.
-            </p>
-            <DialogFooter className="mt-4">
+            <div className="py-2">
+              <p className="text-sm text-muted-foreground">
+                ¿Estás seguro que deseas eliminar el equipo <strong>{deleteTarget?.nombre}</strong> (código: {deleteTarget?.codigo})?
+              </p>
+              <p className="text-sm text-red-600 mt-2 font-medium">
+                ⚠️ Esta acción no se puede deshacer y también eliminará todas las órdenes de mantenimiento relacionadas.
+              </p>
+            </div>
+            <DialogFooter className="gap-2 mt-4">
               <Button
                 variant="outline"
                 type="button"
@@ -856,75 +1385,30 @@ export default function EquiposPage() {
                 type="button"
                 onClick={async () => {
                   if (!deleteTarget) return
-                  await deleteEquipo(deleteTarget.id)
-                  setDeleteTarget(null)
-                  setMenuForCode(null)
+                  try {
+                    await deleteEquipo(deleteTarget.id)
+                    toast({
+                      title: "✅ Equipo eliminado",
+                      description: `El equipo ${deleteTarget.nombre} se ha eliminado correctamente.`
+                    })
+                    setDeleteTarget(null)
+                    setMenuForCode(null)
+                  } catch (error) {
+                    console.error('Error eliminando equipo:', error);
+                    toast({
+                      title: "❌ Error de red",
+                      description: error instanceof Error ? error.message : "Error de red al eliminar equipo",
+                      variant: "destructive"
+                    })
+                  }
                 }}
               >
-                Eliminar
+                Confirmar eliminación
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
-    </div>
-  )
-}
-
-// Modal simple para mostrar detalles del equipo seleccionado
-// Se apoya en el estado selectedEquipment y detailTab definido arriba
-function EquipmentDetailModal({
-  equipment,
-  onClose,
-}: {
-  equipment: UiStoredEquipment | null
-  onClose: () => void
-}) {
-  if (!equipment) return null
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-3xl rounded-md bg-card p-4 shadow-lg">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="text-lg font-semibold">{equipment.nombre}</div>
-            <div className="text-xs text-muted-foreground">{equipment.codigo} • {equipment.area}{equipment.linea ? ` • ${equipment.linea}` : ''}</div>
-          </div>
-          <Button size="sm" variant="ghost" onClick={onClose}>Cerrar</Button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div className="md:col-span-1 flex items-center justify-center">
-              <div className="h-40 w-40 overflow-hidden rounded-md border bg-muted flex items-center justify-center">
-                {equipment.imageDataUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={equipment.imageDataUrl} alt={equipment.nombre} className="h-full w-full object-cover" />
-                ) : (
-                  <span className="text-xs text-muted-foreground">Sin imagen</span>
-                )}
-              </div>
-            </div>
-            <div className="md:col-span-2 space-y-1">
-              <div><span className="font-medium">Código:</span> {equipment.codigo}</div>
-              <div><span className="font-medium">Área:</span> {equipment.area}</div>
-              {equipment.linea && <div><span className="font-medium">Línea:</span> {equipment.linea}</div>}
-              <div><span className="font-medium">Marca:</span> {equipment.marca || '-'}</div>
-              <div><span className="font-medium">Modelo:</span> {equipment.modelo || '-'}</div>
-              <div><span className="font-medium">Fabricante:</span> {equipment.fabricante || '-'}</div>
-              <div><span className="font-medium">Fecha de implementación:</span> {equipment.fechaImplementacion || '-'}</div>
-              <div><span className="font-medium">Fecha de adquisición:</span> {equipment.fechaAdquisicion || '-'}</div>
-              <div className="mt-2 font-medium">Especificaciones técnicas</div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                <div>Capacidad: {equipment.capacidad || '-'}</div>
-                <div>Amperaje: {equipment.amperaje || '-'}</div>
-                <div>Potencia: {equipment.potencia || '-'}</div>
-                <div>Voltaje: {equipment.voltaje || '-'}</div>
-                <div>RPM: {equipment.rpm || '-'}</div>
-                <div>Magnitud medida: {equipment.magnitudMedida || '-'}</div>
-              </div>
-            </div>
-          </div>
-      </div>
     </div>
   )
 }

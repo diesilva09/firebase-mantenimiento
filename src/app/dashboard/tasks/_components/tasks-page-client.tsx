@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Calendar, List, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { useRouter, useSearchParams } from "next/navigation";
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AddTaskDialog } from './add-task-dialog';
@@ -36,6 +37,10 @@ interface TasksPageClientProps {
 }
 
 export default function TasksPageClient({ initialTasks, users }: TasksPageClientProps) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const selectedTaskId = searchParams.get("selectedTaskId");
+
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [viewMode, setViewMode] = useState<ViewMode>('table');
   const [isLoading, setIsLoading] = useState(false);
@@ -49,73 +54,151 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
   const [isSpecsOpen, setIsSpecsOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
 
-    const { toast } = useToast();
+  const { toast } = useToast();
   const { markTasksCompletedAsRead, addNotification, permission } = useNotifications();
 
   const { user } = useUser();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [seenCompletedIds, setSeenCompletedIds] = useState<string[]>([]);
+  const [allTasksForSearch, setAllTasksForSearch] = useState<Task[]>([]);
 
   // Búsqueda global desde el header
   const { query, setSuggestions } = useDashboardSearch();
   const normalizedQuery = query.trim().toLowerCase();
 
   useEffect(() => {
-    const rawEmail =
-      user?.email ||
-      (typeof window !== 'undefined' ? localStorage.getItem('userEmail') : null);
-    const normalizedEmail = rawEmail ? rawEmail.toLowerCase().trim() : null;
-    setUserEmail(normalizedEmail);
+    let mounted = true;
 
-    // 1) Calcular según NEXT_PUBLIC_ADMIN_EMAILS (prioridad absoluta)
-    let envSaysAdmin = false;
-    if (normalizedEmail) {
-      const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
+    async function checkAdmin() {
+      setCheckingAdmin(true);
+      const email = user?.email?.toLowerCase().trim();
+      setUserEmail(email || null);
 
-      envSaysAdmin = adminEnv.includes(normalizedEmail);
+      try {
+        if (user) {
+          // Validar rol desde backend para mayor seguridad
+          const response = await fetch('/api/auth/role', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              email: user.email,
+              uid: user.uid,
+            }),
+          });
+
+          if (response.ok) {
+            const roleData = await response.json();
+            if (mounted) setIsAdmin(roleData.isAdmin);
+          } else {
+            // Fallback a verificación local si la API falla
+            if (email) {
+              const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
+                .split(',')
+                .map((s) => s.trim().toLowerCase())
+                .filter(Boolean);
+
+              const isEnvAdmin = adminEnv.includes(email);
+              if (mounted) setIsAdmin(isEnvAdmin);
+            } else {
+              if (mounted) setIsAdmin(false);
+            }
+          }
+        } else {
+          if (mounted) setIsAdmin(false);
+        }
+      } catch (error) {
+        console.error('Error verificando rol de usuario:', error);
+        // Fallback seguro
+        if (email) {
+          const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
+            .split(',')
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean);
+
+          const isEnvAdmin = adminEnv.includes(email);
+          if (mounted) setIsAdmin(isEnvAdmin);
+        } else {
+          if (mounted) setIsAdmin(false);
+        }
+      } finally {
+        if (mounted) setCheckingAdmin(false);
+      }
     }
 
-    if (envSaysAdmin) {
-      setIsAdmin(true);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('isAdmin', 'true');
-        localStorage.setItem('userEmail', normalizedEmail || '');
-      }
-      return;
+    if (user) {
+      checkAdmin();
+    } else {
+      setCheckingAdmin(false);
+      setIsAdmin(false);
+      setUserEmail(null);
     }
-
-    // 2) Si no es admin por env, usar bandera en localStorage (si existe)
-    if (typeof window !== 'undefined') {
-      const localFlag = localStorage.getItem('isAdmin');
-      if (localFlag === 'true') {
-        setIsAdmin(true);
-        return;
-      }
-      if (localFlag === 'false') {
-        setIsAdmin(false);
-        return;
-      }
-    }
-
-    // 3) Ningún criterio lo marca como admin
-    setIsAdmin(false);
+    
+    return () => {
+      mounted = false;
+    };
   }, [user]);
 
   console.log('USER EMAIL EN TASKS:', userEmail, 'isAdmin:', isAdmin);
 
+  // Cargar TODAS las tareas para el buscador global (sin filtrar por cronograma)
+  useEffect(() => {
+    if (!userEmail) return;
+    const loadAllTasks = async () => {
+      try {
+        // Pasamos undefined como schedule para obtener todas las tareas
+        const dbTasks = await fetchTasksFromDB(undefined, userEmail);
+        const mappedTasks = dbTasks.map(dbTask => 
+          mapDatabaseTaskToFrontend(dbTask, users)
+        );
+        setAllTasksForSearch(mappedTasks);
+      } catch (error) {
+        console.error('Error loading all tasks for search:', error);
+      }
+    };
+    loadAllTasks();
+  }, [userEmail, users]);
+
   // Registrar sugerencias globales para tareas (código + descripción)
   useEffect(() => {
-    const items: SearchSuggestion[] = tasks.map((t) => ({
+    const source = allTasksForSearch.length > 0 ? allTasksForSearch : tasks;
+    const items: SearchSuggestion[] = source.map((t) => ({
       id: t.id,
       label: `${t.code} - ${t.description}`,
       type: 'task',
+      route: `/dashboard/tasks?selectedTaskId=${t.id}`,
     }));
-    setSuggestions(items);
-  }, [tasks, setSuggestions]);
+    setSuggestions((prev) => {
+      const others = prev.filter((s) => s.type !== "task");
+      return [...others, ...items];
+    });
+  }, [tasks, allTasksForSearch, setSuggestions]);
+
+  // Manejar selección de tarea desde el buscador global (Navegación y apertura automática)
+  useEffect(() => {
+    if (!selectedTaskId) return;
+    // Esperar a que carguen todas las tareas para buscar la seleccionada
+    if (allTasksForSearch.length === 0) return;
+
+    const task = allTasksForSearch.find((t) => t.id === selectedTaskId);
+    if (task) {
+      // 1. Cambiar al cronograma correcto si es necesario (ej. Partes Altas)
+      if (selectedSchedule !== task.schedule) {
+        setSelectedSchedule(task.schedule);
+      }
+      // 2. Abrir el modal de detalles
+      handleOpenDetails(task);
+
+      // 3. Limpiar la URL para que no se vuelva a abrir al recargar
+      const params = new URLSearchParams(window.location.search);
+      params.delete('selectedTaskId');
+      const newUrl = params.toString() ? `/dashboard/tasks?${params.toString()}` : '/dashboard/tasks';
+      window.history.replaceState(null, '', newUrl);
+    }
+  }, [selectedTaskId, allTasksForSearch, selectedSchedule]);
 
   // Función para cargar tareas desde la BD
   const loadTasks = async (schedule?: string) => {
@@ -348,41 +431,43 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
       
 
             // Registrar evento en equipos_historial (BD) solo para tareas de equipos
-try {
-  const baseTask = selectedTask || tasks.find(t => t.id === taskId) || null;
+        try {
+          const baseTask = selectedTask || tasks.find(t => t.id === taskId) || null;
+          const isEquipoSchedule =
+            baseTask && (baseTask.schedule === 'Maquinaria' || baseTask.schedule === 'Equipo de Medición');
+          
+          const numericTaskId = parseInt(taskId, 10);
 
-  const isEquipoSchedule =
-    baseTask && (baseTask.schedule === 'Maquinaria' || baseTask.schedule === 'Equipo de Medición');
-
-  if (baseTask && isEquipoSchedule && baseTask.code) {
-    await fetch('/api/equipos/historial', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        codigoEquipo: baseTask.code,            // referencia a equipos(codigo)
-        tareaId: Number(taskId),                // referencia a tareas_cronograma(id)
-        fechaEvento: completionIso,            // fecha_evento
-        labor: workDone,                       // trabajo realizado
-        tipoMantenimiento: tipoMantenimiento,  // tipo_mantenimiento
-        repuestosUsados: repuestos,           // repuestos_usados
-        observaciones: observaciones,         // observaciones
-        ejecutadoPor: executedBy.name,        // ejecutado_por
-        creadoPor: userEmail || null,         // creado_por (email del usuario actual)
-      }),
-    });
-  }
-} catch (e) {
-  console.warn('No se pudo registrar la tarea en equipos_historial', e);
-}
+          if (baseTask && isEquipoSchedule && baseTask.code && !isNaN(numericTaskId)) {
+            await fetch('/api/equipos/historial', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                codigoEquipo: baseTask.code,            // referencia a equipos(codigo)
+                tareaId: numericTaskId,                 // referencia a tareas_cronograma(id)
+                fechaEvento: completionIso,             // fecha_evento
+                labor: workDone,                        // trabajo realizado
+                tipoMantenimiento: tipoMantenimiento,   // tipo_mantenimiento
+                repuestosUsados: repuestos,             // repuestos_usados
+                observaciones: observaciones,           // observaciones
+                ejecutadoPor: executedBy.name,          // ejecutado_por
+                creadoPor: userEmail || null,           // creado_por (email del usuario actual)
+              }),
+            });
+          }
+        } catch (e) {
+          console.warn('No se pudo registrar la tarea en equipos_historial', e);
+        }
 
            
         // Registrar evento en zonas_historial (BD) para tareas asociadas a zonas
         try {
           const baseTaskForZona = selectedTask || tasks.find(t => t.id === taskId) || null;
+          const numericTaskId = parseInt(taskId, 10);
 
-          if (baseTaskForZona && baseTaskForZona.code) {
+          if (baseTaskForZona && baseTaskForZona.code && !isNaN(numericTaskId)) {
             await fetch('/api/zonas/historial', {
               method: 'POST',
               headers: {
@@ -390,7 +475,7 @@ try {
               },
               body: JSON.stringify({
                 codigoZona: baseTaskForZona.code,      // referencia a zonas(codigo)
-                tareaId: Number(taskId),               // referencia a tareas_cronograma(id)
+                tareaId: numericTaskId,                // referencia a tareas_cronograma(id)
                 fechaEvento: completionIso,            // fecha_evento
                 labor: workDone,                       // trabajo realizado
                 tipoMantenimiento: tipoMantenimiento,  // tipo_mantenimiento

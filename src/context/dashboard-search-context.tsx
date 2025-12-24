@@ -1,21 +1,29 @@
 "use client";
 
-import { createContext, useContext, useState, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  ReactNode,
+  Dispatch,
+  SetStateAction,
+} from "react";
 
-export type SearchSuggestionType = "task" | "form" | "equipo";
+export type SearchSuggestionType = "task" | "form" | "equipo" | "repuesto";
 
 export type SearchSuggestion = {
   id: string;
   label: string;
   type: SearchSuggestionType;
   route?: string;
+  searchTerms?: string;
 };
 
 type SearchContextValue = {
   query: string;
   setQuery: (value: string) => void;
   suggestions: SearchSuggestion[];
-  setSuggestions: (items: SearchSuggestion[]) => void;
+  setSuggestions: Dispatch<SetStateAction<SearchSuggestion[]>>;
 };
 
 const SearchContext = createContext<SearchContextValue | undefined>(undefined);

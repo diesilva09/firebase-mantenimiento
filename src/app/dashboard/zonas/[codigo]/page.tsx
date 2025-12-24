@@ -23,6 +23,11 @@ export default function ZonaDetallePage() {
   const [loading, setLoading] = useState(false);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
+  // Filtros
+  const [tipoFilter, setTipoFilter] = useState<string>("");
+  const [startDateFilter, setStartDateFilter] = useState<string>("");
+  const [endDateFilter, setEndDateFilter] = useState<string>("");
+
   useEffect(() => {
     const fetchHistorial = async () => {
       try {
@@ -65,6 +70,20 @@ export default function ZonaDetallePage() {
     }
   }, [codigo]);
 
+  // Filtrar registros según los filtros seleccionados
+  const filteredRows = rows.filter((row) => {
+    const normalizedTipo = (row.tipo || "").toLowerCase().trim();
+
+    // Filtro por tipo de mantenimiento (comparación normalizada)
+    if (tipoFilter && normalizedTipo !== tipoFilter) return false;
+
+    // Filtros por fecha (row.fecha está en formato yyyy-mm-dd)
+    if (startDateFilter && row.fecha && row.fecha < startDateFilter) return false;
+    if (endDateFilter && row.fecha && row.fecha > endDateFilter) return false;
+
+    return true
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -88,6 +107,41 @@ export default function ZonaDetallePage() {
 
       <div className="space-y-2">
         <h2 className="text-lg font-medium">Hoja de vida de la zona</h2>
+
+        <div className="flex flex-wrap gap-2 text-[11px] sm:text-xs">
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-medium text-muted-foreground">Tipo mantenimiento</span>
+            <select
+              className="h-8 rounded-md border border-input bg-background px-2 text-[11px] focus-visible:outline-none"
+              value={tipoFilter}
+              onChange={(e) => setTipoFilter(e.target.value)}
+            >
+              <option value="">Todos</option>
+              <option value="correctivo">Correctivo</option>
+              <option value="preventivo">Preventivo</option>
+              <option value="rutinario">Rutinario</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-medium text-muted-foreground">Desde</span>
+            <input
+              type="date"
+              className="h-8 rounded-md border border-input bg-background px-2 text-[11px]"
+              value={startDateFilter}
+              onChange={(e) => setStartDateFilter(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-medium text-muted-foreground">Hasta</span>
+            <input
+              type="date"
+              className="h-8 rounded-md border border-input bg-background px-2 text-[11px]"
+              value={endDateFilter}
+              onChange={(e) => setEndDateFilter(e.target.value)}
+            />
+          </div>
+        </div>
+
         <div className="overflow-x-auto rounded-md border bg-card">
           <table className="min-w-full text-[11px] sm:text-xs">
             <thead className="bg-muted text-left">
@@ -130,8 +184,17 @@ export default function ZonaDetallePage() {
                     No hay registros de mantenimiento aún para esta zona.
                   </td>
                 </tr>
+              ) : filteredRows.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="px-2 py-4 sm:px-3 text-center text-muted-foreground"
+                  >
+                    No hay registros que coincidan con los filtros seleccionados.
+                  </td>
+                </tr>
               ) : (
-                rows.map((row, idx) => (
+                filteredRows.map((row, idx) => (
                   <React.Fragment key={`zhv-${idx}`}>
                     <tr className="border-t">
                       <td className="px-2 py-1 sm:px-3 sm:py-2 align-top whitespace-nowrap">

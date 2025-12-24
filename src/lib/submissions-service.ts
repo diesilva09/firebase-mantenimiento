@@ -269,7 +269,7 @@ export async function getFormsMetadata(): Promise<FormMetadata[]> {
     },
     {
       slug: 'maintenance-minutes',
-      title: 'Minuta Mtto 2025',
+      title: 'Minuta Mtto 2026',
       description: 'Registro de minutos de mantenimiento'
     }
   ];
