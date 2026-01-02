@@ -4,7 +4,7 @@ import { useToast } from '@/hooks/use-toast'
 
 // Definir los tipos que faltan
 type EquipmentArea = "conservas" | "salsas" | "frutos" | "etiquetado" | "ptar" | "servicio de apoyo" | "logistica" | "locativo" | "medicion"
-type EquipmentStatus = "Operativo" | "En mantenimiento" | "Fuera de servicio"
+type EquipmentStatus = "Operativo" | "En mantenimiento" | "Fuera de servicio" | "En backup"
 
 interface EquipmentForm {
   codigo: string

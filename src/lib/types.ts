@@ -45,7 +45,7 @@ export type Submission = {
   data: Record<string, any>;
 };
  
-export type NotificationType = 'task_alert' | 'form_submission' | 'system';
+export type NotificationType = 'task_alert' | 'form_submission' | 'system' | 'spare_part_usage';
 export type NotificationSeverity = 'info' | 'warning' | 'critical';
 export type Notification = {
   id: string;

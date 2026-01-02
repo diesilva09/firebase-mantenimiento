@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { LogOut, Search } from "lucide-react"
 import { NotificationBadge } from "@/components/notification-badge"
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,8 @@ import { useDashboardSearch } from "@/context/dashboard-search-context"
 export function DashboardHeader() {
   const router = useRouter()
   const pathname = usePathname()
-  const { query, setQuery, suggestions } = useDashboardSearch()
+  const { query, setQuery, suggestions, /* highlightedSuggestionId, */ setHighlightedSuggestionId } = useDashboardSearch()
+  const [hoveredSuggestionId, setHoveredSuggestionId] = useState<string | null>(null)
 
   const [showSuggestions, setShowSuggestions] = useState(false)
 
@@ -31,20 +32,44 @@ export function DashboardHeader() {
     router.push('/login')
   }
 
-  // Filtrar sugerencias según el texto, sin filtrar por tipo de página para permitir búsqueda global
+  // Filtrar sugerencias según el texto y el módulo activo. Solo mostramos
+  // sugerencias relevantes al módulo actual (p. ej. solo `equipo` cuando
+  // estamos en /dashboard/equipos). En la ruta principal mostramos todo.
   const filteredSuggestions = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return []
 
-    // No filtrar por tipo de página para permitir búsqueda global de todas las sugerencias
+    // Determinar tipos permitidos según la ruta
+    const allowedTypes: string[] = []
+    if (pathname.startsWith("/dashboard/tasks")) allowedTypes.push("task")
+    else if (pathname.startsWith("/dashboard/forms")) allowedTypes.push("form")
+    else if (pathname.startsWith("/dashboard/equipos")) allowedTypes.push("equipo")
+    else if (pathname.startsWith("/dashboard/inventario")) allowedTypes.push("repuesto")
+    else if (pathname.startsWith("/dashboard/zonas")) allowedTypes.push("zona")
+    else {
+      // Rutas fuera de módulos específicos (p. ej. /dashboard) muestran todo
+      allowedTypes.push("task", "form", "equipo", "repuesto", "zona")
+    }
+
     return suggestions
-      .filter((s) => s.label.toLowerCase().includes(q))
+      .filter((s) => allowedTypes.includes(s.type) && s.label.toLowerCase().includes(q))
       .slice(0, 10)
   }, [suggestions, query, pathname])
 
-  const handleSelectSuggestion = (label: string, route?: string) => {
+  // We DO NOT auto-set highlightedSuggestionId when suggestions appear (typing).
+  // Only set highlighted suggestion when the user confirms selection (Enter or click).
+  useEffect(() => {
+    if (!showSuggestions) {
+      setHoveredSuggestionId(null)
+    }
+  }, [showSuggestions])
+
+  const handleSelectSuggestion = (label: string, route?: string, id?: string) => {
     setQuery(label)
     setShowSuggestions(false)
+    if (id) {
+      setHighlightedSuggestionId(id)
+    }
     if (route) {
       router.push(route)
     }
@@ -59,7 +84,7 @@ export function DashboardHeader() {
             e.preventDefault()
             const first = filteredSuggestions[0]
             if (first) {
-              handleSelectSuggestion(first.label, first.route)
+              handleSelectSuggestion(first.label, first.route, first.id)
             }
           }}
         >
@@ -80,12 +105,12 @@ export function DashboardHeader() {
                 // Dar tiempo a hacer click en sugerencia
                 setTimeout(() => setShowSuggestions(false), 150)
               }}
-              onKeyDown={(e) => {
+                onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   const first = filteredSuggestions[0]
                   if (first) {
                     e.preventDefault()
-                    handleSelectSuggestion(first.label, first.route)
+                    handleSelectSuggestion(first.label, first.route, first.id)
                   }
                 }
               }}
@@ -101,8 +126,10 @@ export function DashboardHeader() {
                     className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
                     onMouseDown={(ev) => {
                       ev.preventDefault()
-                      handleSelectSuggestion(s.label, s.route)
+                      handleSelectSuggestion(s.label, s.route, s.id)
                     }}
+                    onMouseEnter={() => setHoveredSuggestionId(s.id)}
+                    onMouseLeave={() => setHoveredSuggestionId(null)}
                   >
                     <span className="font-medium">{s.label}</span>
                   </button>

@@ -293,7 +293,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="sm:max-w-[525px]">
+      <DialogContent className="w-[95vw] sm:max-w-[525px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>Editar Tarea: {task.code}</DialogTitle>
           <DialogDescription>
@@ -533,7 +533,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
                             )}
                           >
                             {field.value ? (
-                              format(field.value, "PPP", { locale: es })
+                              format(field.value, "PPP HH:mm", { locale: es })
                             ) : (
                               <span>Seleccione una fecha</span>
                             )}
@@ -545,10 +545,35 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
                         <Calendar
                           mode="single"
                           selected={field.value}
-                          onSelect={field.onChange}
+                          onSelect={(date) => {
+                            if (!date) return
+                            const newDate = new Date(date)
+                            if (field.value) {
+                              newDate.setHours(field.value.getHours(), field.value.getMinutes())
+                            }
+                            field.onChange(newDate)
+                          }}
                           disabled={(date) => date < new Date("1900-01-01")}
                           initialFocus
                         />
+                        <div className="p-3 border-t border-border">
+                          <div className="flex items-center space-x-2">
+                            <span>Hora:</span>
+                            <Input
+                              type="time"
+                              value={field.value ? format(field.value, "HH:mm") : "00:00"}
+                              onChange={(e) => {
+                                if (field.value) {
+                                  const [hours, minutes] = e.target.value.split(':').map(Number);
+                                  const newDate = new Date(field.value);
+                                  newDate.setHours(hours, minutes);
+                                  field.onChange(newDate);
+                                }
+                              }}
+                              className="w-24"
+                            />
+                          </div>
+                        </div>
                       </PopoverContent>
                     </Popover>
                     <FormMessage />

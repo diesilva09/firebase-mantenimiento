@@ -20,6 +20,7 @@ import { useUser } from '@/firebase/auth/use-user'
 import { useEquipos } from '@/hooks/use-equipos' 
 import { useDashboardSearch, SearchSuggestion } from '@/context/dashboard-search-context'
 import { EquipmentDetailModal } from "@/components/equipment-detail-modal"
+import { useNotifications } from "@/hooks/use-notifications"
 
 const equipmentSchema = z.object({
   codigo: z.string().min(1, "El código es requerido").max(50, "El código es muy largo"),
@@ -49,7 +50,7 @@ const equipmentSchema = z.object({
   voltaje: z.string().regex(/^[\d.]+\s*.*$|^\s*$|^$/, "Formato inválido para voltaje").optional(),
   rpm: z.string().regex(/^\d+.*$|^\s*$|^$/, "Formato inválido para RPM").optional(),
   magnitudMedida: z.string().max(50, "La magnitud medida es muy larga").optional(),
-  estado: z.enum(["Operativo", "En mantenimiento", "Fuera de servicio"]).optional(),
+  estado: z.enum(["Operativo", "En mantenimiento", "Fuera de servicio", "En backup"]).optional(),
   attachmentsUrl: z.string().optional().nullable(),
 })
 
@@ -178,6 +179,7 @@ export default function EquiposPage() {
         if (mounted) setCheckingAdmin(false)
       }
     }
+
 
     checkAdmin()
     return () => {
@@ -425,7 +427,7 @@ export default function EquiposPage() {
   }, [view, filter, lineFilters])
 
   // Equipo que se muestra en el modal de ficha técnica
-  const [modalEquipment, setModalEquipment] = useState<UiStoredEquipment | null>(null)
+  const [modalEquipmentCode, setModalEquipmentCode] = useState<string | null>(null)
   // Equipo pendiente de confirmar eliminación
   const [deleteTarget, setDeleteTarget] = useState<UiStoredEquipment | null>(null)
   // Código del equipo cuyo menú (tres puntos) está abierto
@@ -435,13 +437,17 @@ export default function EquiposPage() {
   // Estado para rastrear la carga de anexos
   const [loadingAnexos, setLoadingAnexos] = useState<string | null>(null)
 
+  const modalEquipment = modalEquipmentCode
+    ? equipos.find((e) => e.codigo === modalEquipmentCode)
+    : null
+
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const imageFile = form.watch("image")
 
   useEffect(() => {
     let objectUrl: string | null = null;
     const fileList = imageFile as FileList | undefined;
-    
+
     if (fileList && fileList.length > 0) {
       const file = fileList[0];
       objectUrl = URL.createObjectURL(file);
@@ -611,10 +617,17 @@ export default function EquiposPage() {
           setEditingId(null)
           form.reset()
           setView('list')
+          // Limpiar cualquier resaltado previo (p. ej. venimos de una búsqueda)
+          if (highlightedCodigo) setHighlightedCodigo(null)
 
           toast({
             title: "Equipo actualizado",
             description: "El equipo se ha actualizado correctamente."
+          });
+
+          toast({
+            title: "Equipo creado",
+            description: "El equipo se ha creado correctamente."
           });
         } else {
           toast({
@@ -629,6 +642,8 @@ export default function EquiposPage() {
         if (success) {
           form.reset()
           setView('list')
+          // Limpiar resaltado previo al crear nuevo equipo
+          if (highlightedCodigo) setHighlightedCodigo(null)
 
           toast({
             title: "Equipo creado",
@@ -719,6 +734,7 @@ export default function EquiposPage() {
                   <option value="Operativo">Operativo</option>
                   <option value="En mantenimiento">En mantenimiento</option>
                   <option value="Fuera de servicio">Fuera de servicio</option>
+                  <option value="En backup">En backup</option>
                 </select>
               </div>
             </div>
@@ -903,6 +919,7 @@ export default function EquiposPage() {
                           <option value="Operativo">Operativo</option>
                           <option value="En mantenimiento">En mantenimiento</option>
                           <option value="Fuera de servicio">Fuera de servicio</option>
+                          <option value="En backup">En backup</option>
                         </select>
                       </FormControl>
                       <FormMessage />
@@ -1126,14 +1143,7 @@ export default function EquiposPage() {
                                   // Buscar el equipo actualizado en la lista más reciente
                                   const updatedEquipment = equipos.find(eq => eq.id === e.id)
                                   
-                                  // Abrir el modal con la información del equipo
-                                  if (updatedEquipment) {
-                                    // Convertir StoredEquipment a UiStoredEquipment para el modal
-                                    setModalEquipment({
-                                      ...updatedEquipment,
-                                      area: updatedEquipment.area as any,
-                                    } as UiStoredEquipment)
-                                  }
+                                  setModalEquipmentCode(e.codigo)
 
                                   // Una vez que el usuario interactúa con una tarjeta, limpiamos
                                   // el resaltado automático.
@@ -1170,6 +1180,7 @@ export default function EquiposPage() {
                                           "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium mt-6 "
                                         if (estado === "Operativo") classes += "bg-green-100 text-green-800"
                                         else if (estado === "En mantenimiento") classes += "bg-yellow-100 text-yellow-800"
+                                        else if (estado === "En backup") classes += "bg-blue-100 text-blue-800"
                                         else classes += "bg-red-100 text-red-800"
                                       
                                         return <span className={classes}>{estado}</span>
@@ -1213,6 +1224,9 @@ export default function EquiposPage() {
                                             onClick={(ev) => {
                                               ev.stopPropagation()
                                               setMenuForCode(null)
+                                              // Limpiar cualquier resaltado previo al editar para evitar
+                                              // que otro equipo quede resaltado accidentalmente.
+                                              if (highlightedCodigo) setHighlightedCodigo(null)
                                               setView("form")
                                               setEditingId(e.id)
                                               form.reset({
@@ -1353,9 +1367,10 @@ export default function EquiposPage() {
       </div>
 
       <EquipmentDetailModal
-        equipment={modalEquipment}
-        isOpen={!!modalEquipment}
-        onClose={() => setModalEquipment(null)}
+        equipment={modalEquipment as any}
+        isOpen={!!modalEquipmentCode}
+        onClose={() => setModalEquipmentCode(null)}
+        isLoading={!!modalEquipmentCode && equiposLoading}
       /> 
 
       {isAdmin && deleteTarget && (

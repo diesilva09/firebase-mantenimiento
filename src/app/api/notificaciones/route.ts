@@ -1,11 +1,16 @@
-// /api/notificaciones/route.ts
 import { NextResponse } from 'next/server'
-import { query } from '@/lib/db' // usamos query, no db
+import { query } from '@/lib/db'
+import { createNotification } from '@/lib/notification-service'
 
 export async function GET() {
   try {
+    // Solo mostrar notificaciones de los últimos 7 días para evitar mostrar notificaciones antiguas o de otros usuarios
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
     const result = await query(
-      'SELECT id, titulo, mensaje, tipo, severidad, estado_tarea, prioridad, ref_task_id, creado_en FROM notificaciones ORDER BY creado_en DESC LIMIT 50'
+      'SELECT id, titulo, mensaje, tipo, severidad, estado_tarea, prioridad, ref_task_id, creado_en FROM notificaciones WHERE creado_en >= $1 ORDER BY creado_en DESC LIMIT 50',
+      [sevenDaysAgo.toISOString()]
     )
     return NextResponse.json({ data: result.rows })
   } catch (e) {
@@ -16,27 +21,10 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const {
-      titulo,
-      mensaje,
-      tipo,
-      severidad,
-      estado_tarea,
-      prioridad,
-      ref_task_id,
-    } = body
-
-    const result = await query(
-      `INSERT INTO notificaciones
-        (titulo, mensaje, tipo, severidad, estado_tarea, prioridad, ref_task_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       RETURNING id, titulo, mensaje, tipo, severidad, estado_tarea, prioridad, ref_task_id, creado_en`,
-      [titulo, mensaje, tipo, severidad, estado_tarea, prioridad, ref_task_id]
-    )
-
-    return NextResponse.json({ data: result.rows[0] })
+    const newNotification = await createNotification(body);
+    return NextResponse.json({ data: newNotification })
   } catch (e) {
-    console.error('Error al crear notificación', e)
+    console.error('Error en la ruta POST /api/notificaciones:', e)
     return NextResponse.json({ error: 'Error al crear notificación' }, { status: 500 })
   }
 }

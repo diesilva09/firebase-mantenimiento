@@ -101,7 +101,7 @@ export async function POST(req: Request) {
     // 3) Registrar la solicitud de uso en la tabla de historial
     const hasDescripcion = typeof descripcionUso === "string" && descripcionUso.trim().length > 0
 
-    await query(
+    const usoResult = await query(
       `INSERT INTO repuestos_uso_solicitudes (
          repuesto_id,
          cantidad_solicitada,
@@ -113,7 +113,8 @@ export async function POST(req: Request) {
          completado_por,
          completado_at
        ) VALUES ($1, $2, $3, $4, $5, $6,
-                 $7, $8, $9)`,
+                 $7, $8, $9)
+       RETURNING id, estado`,
       [
         repuestoId,
         cantidad,
@@ -127,6 +128,30 @@ export async function POST(req: Request) {
       ]
     )
 
+    const nuevoUso = usoResult.rows[0]
+
+    // Crear notificación
+    try {
+      const baseUrl = process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : `http://localhost:${process.env.PORT ?? 3000}`;
+
+      await fetch(`${baseUrl}/api/notificaciones`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          titulo: `Uso de Repuesto ${nuevoUso.estado}`,
+          mensaje: `Responsable: ${responsable}\nRepuesto: ${cantidad} x ${updated.descripcion}\nMáquina: ${maquinaLabel}`,
+          tipo: 'spare_part_usage',
+          severidad: 'info',
+          ref_task_id: nuevoUso.id,
+          estado_tarea: nuevoUso.estado
+        })
+      })
+    } catch (notificationError) {
+      console.error('Error creando la notificación:', notificationError)
+    }
+
     // Devolver tanto stock_maximo como un alias stock_actual para compatibilidad
     return NextResponse.json({
       success: true,
@@ -135,6 +160,8 @@ export async function POST(req: Request) {
           ...updated,
           stock_actual: updated.stock_maximo,
         },
+        usageId: nuevoUso.id,
+        usageStatus: nuevoUso.estado,
         lowStock,
       },
     })

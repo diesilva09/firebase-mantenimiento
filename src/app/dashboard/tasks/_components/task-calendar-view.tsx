@@ -74,12 +74,12 @@ export function TaskCalendarView({ tasks, onTaskClick }: TaskCalendarViewProps) 
   return (
     <Card>
       <CardContent className="p-2 sm:p-4">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 mb-4">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mb-4">
+          <div className="flex items-center justify-between w-full sm:w-auto gap-2">
             <Button variant="outline" size="icon" className="h-8 w-8 sm:h-9 sm:w-9" onClick={() => setCurrentDate(subMonths(currentDate, 1))}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2 flex-1 justify-center sm:justify-start">
               <select
                 className="h-9 rounded-md border border-input bg-background px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                 value={format(currentDate, 'MM')}
@@ -118,8 +118,8 @@ export function TaskCalendarView({ tasks, onTaskClick }: TaskCalendarViewProps) 
             <Button variant="outline" size="icon" className="h-8 w-8 sm:h-9 sm:w-9" onClick={() => setCurrentDate(addMonths(currentDate, 1))}>
               <ChevronRight className="h-4 w-4" />
             </Button>
+            <Button variant="outline" size="sm" className="ml-auto sm:ml-0" onClick={() => setCurrentDate(new Date())}>Hoy</Button>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setCurrentDate(new Date())}>Hoy</Button>
         </div>
         
         {hasTasks ? (

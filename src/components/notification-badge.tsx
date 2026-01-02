@@ -1,6 +1,7 @@
 // components/notification-badge.tsx
 "use client"
 
+import { useRouter } from "next/navigation"
 import { Bell, Check, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -13,15 +14,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
-import { useNotifications } from "@/hooks/use-notifications"
+import { useNotificationsContext as useNotifications } from "@/context/notifications-context"
 import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale"
 import { Notification } from "@/lib/types"
 
 const severityIcons = {
-  info: '🔵',
+  info: '🔧',
   warning: '🟡',
-  critical: '🔴'
+  critical: '🔴',
+  success: '✅'
 }
 
 const typeIcons = {
@@ -30,7 +32,24 @@ const typeIcons = {
   system: '🔔'
 }
 
+const getStatusBadgeClass = (status?: Notification['status']): string => {
+  if (!status) return "bg-muted text-muted-foreground border";
+  
+  const s = status.toLowerCase();
+  if (s === 'completada') {
+    return 'bg-green-100 text-green-800 border border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700/50';
+  }
+  if (s === 'pendiente') {
+    return 'bg-red-100 text-red-800 border border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700/50';
+  }
+  if (s === 'futura') { // El estado es 'Futura', se muestra como 'Próxima'
+    return 'bg-blue-100 text-blue-800 border border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700/50';
+  }
+  return "bg-muted text-muted-foreground border";
+};
+
 export function NotificationBadge() {
+  const router = useRouter()
   const {
     permission,
     notifications,
@@ -42,46 +61,32 @@ export function NotificationBadge() {
     hideAllNotifications,
   } = useNotifications()
 
+  const handleNotificationClick = (notification: Notification) => {
+    markAsRead(notification.id)
 
+    if (notification.type === 'task_alert' && notification.refId) {
+      router.push(`/dashboard/tasks?selectedTaskId=${notification.refId}`)
+    }
+
+    if (notification.type === 'spare_part_usage' && notification.refId) {
+      // Navegar a la página de usos y la página se encargará de mostrar la pestaña correcta
+      router.push(`/dashboard/usos-repuestos?selectedUsageId=${notification.refId}`)
+    }
+
+    // Aquí se pueden agregar más lógicas de navegación para otros tipos de notificaciones
+    // ...
+  }
 
   const getNotificationIcon = (notification: Notification) => {
     return typeIcons[notification.type] || severityIcons[notification.severity] || '🔔'
   }
 
  const getNotificationStyles = (notification: Notification) => {
-  // Punto: SIEMPRE por prioridad
-  let dotColor = ''
-
-  if (notification.severity === 'critical') {
-    // Prioridad alta
-    dotColor = 'bg-red-500'
-  } else if (notification.severity === 'warning') {
-    // Prioridad media
-    dotColor = 'bg-yellow-500'
-  } else {
-    // info (baja)
-    dotColor = 'bg-blue-500'
-  }
-
-  // Tarjeta (franja izquierda + fondo de no leída) por ESTADO
-  let borderColor = ''
-  let bgUnread = ''
-
-  if (notification.status === 'Completada') {
-    // Completada → verde
-    borderColor = 'border-l-emerald-500'
-    bgUnread = 'bg-emerald-50 dark:bg-emerald-950/30'
-  } else if (notification.status === 'Futura') {
-    // Próxima/futura → morado
-    borderColor = 'border-l-indigo-500'
-    bgUnread = 'bg-indigo-50 dark:bg-indigo-950/30'
-  } else {
-    // Pendiente (o sin status) → naranja
-    borderColor = 'border-l-amber-500'
-    bgUnread = 'bg-amber-50 dark:bg-amber-950/30'
-  }
-
-  return { borderColor, dotColor, bgUnread }
+    // Estilo simplificado: sin colores de estado/prioridad
+    return {
+      bgUnread: 'bg-accent/50',
+      dotColor: !notification.read ? 'bg-white-500' : 'hidden'
+    }
 }
   return (
     <DropdownMenu>
@@ -145,37 +150,40 @@ export function NotificationBadge() {
         ) : (
           <div className="max-h-96 overflow-y-auto">
        {notifications.slice(0, 20).map((notification) => {
-      const { borderColor, dotColor, bgUnread } = getNotificationStyles(notification)
+      const { dotColor, bgUnread } = getNotificationStyles(notification)
 
       return (
         <DropdownMenuItem
           key={notification.id}
           className={`
-            p-3 cursor-pointer border-b last:border-b-0 border-l-4
-            ${borderColor}
+            p-3 cursor-pointer border-b last:border-b-0
             ${!notification.read ? bgUnread : ''}
           `}
-          onClick={() => {
-            // Solo marcar como leída para bajar el contador, pero mantenerla en la bandeja
-            markAsRead(notification.id)
-          }}
+          onClick={() => handleNotificationClick(notification)}
         >
           <div className="flex gap-3 w-full">
             <div className="text-lg flex-shrink-0">
               {getNotificationIcon(notification)}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="font-medium text-sm mb-1 line-clamp-2">
-                {notification.title}
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="font-medium text-sm whitespace-pre-wrap break-words">
+                  {notification.title}
+                </span>
+                {notification.status && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${getStatusBadgeClass(notification.status)}`}>
+                    {notification.status === 'Futura' ? 'Próxima' : notification.status}
+                  </span>
+                )}
               </div>
               <div className="text-xs text-muted-foreground mb-1 whitespace-pre-line line-clamp-3">
                 {notification.message}
               </div>
               <div className="text-xs text-muted-foreground">
-                {formatDistanceToNow(new Date(notification.createdAt), { 
+                {formatDistanceToNow(new Date(notification.createdAt), {
                   addSuffix: true,
-                  locale: es 
-            })}
+                  locale: es
+                })}
           </div>
         </div>
         <div className="flex flex-col items-end gap-2 flex-shrink-0 mt-1">

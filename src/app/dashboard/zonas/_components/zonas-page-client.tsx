@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, Loader2 } from "lucide-react";
 import { useUser } from "@/firebase/auth/use-user";
 import {
   DropdownMenu,
@@ -25,7 +25,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useDashboardSearch, SearchSuggestion } from "@/context/dashboard-search-context";
 
 const AREAS_PARTES_ALTAS = [
   "Planta (Primer Piso)",
@@ -92,13 +91,12 @@ export function ZonasPageClient() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
-  const { setSuggestions } = useDashboardSearch();
-
   const [deleteTarget, setDeleteTarget] = useState<Zona | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
 
   const [codigoDuplicado, setCodigoDuplicado] = useState(false);
+  const [loadingMantenimientosId, setLoadingMantenimientosId] = useState<string | null>(null);
 
   // Estado para mantener el resaltado de la zona buscada
   const [highlightedZonaCodigo, setHighlightedZonaCodigo] = useState<string | null>(null);
@@ -129,27 +127,6 @@ export function ZonasPageClient() {
 
     fetchZonas();
   }, []); // Se ejecuta solo al montar el componente
-
-  // Registrar sugerencias globales para zonas con rutas de navegación
-  useEffect(() => {
-    const items: SearchSuggestion[] = zonas.map((z) => {
-      const areaPart = z.area ? ` - ${z.area}` : "";
-      const tipoPart = z.tipo === "PARTES_ALTAS" ? " (Partes Altas)" : " (Locativo)";
-      const label = `${z.codigo || "SIN-COD"}${areaPart} - ${z.nombre}${tipoPart}`;
-
-      return {
-        id: z.id,
-        label,
-        type: "zona",
-        route: `/dashboard/zonas?selectedZonaCodigo=${encodeURIComponent(z.codigo || z.id)}`,
-      };
-    });
-    
-    setSuggestions((prev) => {
-      const others = prev.filter((s) => s.type !== "zona");
-      return [...others, ...items];
-    });
-  }, [zonas, setSuggestions]);
 
   useEffect(() => {
     let mounted = true;
@@ -440,6 +417,7 @@ export function ZonasPageClient() {
       return;
     }
 
+    setLoadingMantenimientosId(zona.id);
     router.push(`/dashboard/zonas/${encodeURIComponent(zona.codigo)}`);
   };
 
@@ -565,8 +543,13 @@ export function ZonasPageClient() {
                               e.stopPropagation(); // Prevenir propagación
                               handleOpenMantenimientos(z);
                             }}
+                                disabled={loadingMantenimientosId === z.id}
                           >
-                            Mantenimientos
+                                {loadingMantenimientosId === z.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  "Mantenimientos"
+                                )}
                           </Button>
                         </td>
                       )}
@@ -654,8 +637,13 @@ export function ZonasPageClient() {
                                 e.stopPropagation(); // Prevenir propagación
                                 handleOpenMantenimientos(z);
                               }}
+                              disabled={loadingMantenimientosId === z.id}
                             >
-                              Mantenimientos
+                              {loadingMantenimientosId === z.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                "Mantenimientos"
+                              )}
                             </Button>
                           </td>
                         )}

@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import {
   Table,
   TableBody,
@@ -24,10 +23,10 @@ import type { Submission, FormMetadata } from "@/lib/types"
 import { formatDate } from "@/lib/utils"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
-import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { getAllSubmissions, getFormsMetadata } from '@/lib/submissions-service'
 import { useEquipos } from '@/hooks/use-equipos'
+import { EquipmentDetailModal, type EquipmentDetail } from "@/components/equipment-detail-modal"
 
 interface ResponsesViewProps {
   submissions?: Submission[]; // Hacer opcional para poder usar sin props
@@ -41,7 +40,10 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
   const [selectedForm, setSelectedForm] = React.useState("all")
   const [selectedSubmission, setSelectedSubmission] = React.useState<Submission | null>(null)
   const [isDetailViewOpen, setIsDetailViewOpen] = React.useState(false)
-  const [loading, setLoading] = React.useState(!initialSubmissions) // Solo loading si no vienen props
+  const [loading, setLoading] = React.useState(!initialSubmissions)
+
+  const [selectedEquipmentForModal, setSelectedEquipmentForModal] = React.useState<EquipmentDetail | null>(null)
+  const [isEquipmentModalOpen, setIsEquipmentModalOpen] = React.useState(false)
 
   const { equipos } = useEquipos()
 
@@ -69,10 +71,9 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
     [equipos],
   )
 
-  // Cargar datos si no se pasan como props
   React.useEffect(() => {
     const loadData = async () => {
-      if (initialSubmissions && initialForms) return // Si vienen props, no cargar
+      if (initialSubmissions && initialForms) return
         
       try {
         setLoading(true)
@@ -107,6 +108,11 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
   const handleViewDetails = (submission: Submission) => {
     setSelectedSubmission(submission)
     setIsDetailViewOpen(true)
+  }
+
+  const handleEquipoClick = (equipo: EquipmentDetail) => {
+    setSelectedEquipmentForModal(equipo)
+    setIsEquipmentModalOpen(true)
   }
 
   if (loading) {
@@ -245,12 +251,12 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
 
                         if (equipoMatch) {
                           return (
-                            <Link
-                              href={`/dashboard/equipos/${encodeURIComponent(equipoMatch.codigo)}?view=hoja-vida`}
-                              className="font-semibold whitespace-pre-wrap break-all inline-block max-w-xs text-blue-600 hover:underline"
+                            <button
+                              onClick={() => handleEquipoClick(equipoMatch)}
+                              className="font-semibold whitespace-pre-wrap break-all inline-block max-w-xs text-blue-600 hover:underline text-left"
                             >
                               {formatEquipoLabel(stringValue)}
-                            </Link>
+                            </button>
                           )
                         }
 
@@ -273,6 +279,13 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
           </DialogContent>
         </Dialog>
       )}
+
+      <EquipmentDetailModal
+        equipment={selectedEquipmentForModal}
+        isOpen={isEquipmentModalOpen}
+        onClose={() => setIsEquipmentModalOpen(false)}
+        showHojaDeVidaButton={true}
+      />
     </>
   )
 }

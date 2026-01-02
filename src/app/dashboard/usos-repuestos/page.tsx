@@ -10,7 +10,8 @@ import { useToast } from "@/hooks/use-toast"
 import { useEquipos } from "@/hooks/use-equipos"
 import { Eye } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { useNotifications } from "@/hooks/use-notifications"
+import { useNotificationsContext as useNotifications } from "@/context/notifications-context"
+import { useSearchParams } from "next/navigation"
 import type { Notification } from "@/lib/types"
 
 
@@ -35,7 +36,9 @@ interface UsoRepuestoItem {
 
 export default function UsosRepuestosPage() {
   const { toast } = useToast()
-  const { addNotification, permission } = useNotifications()
+  const { permission, refreshNotifications } = useNotifications()
+  const searchParams = useSearchParams();
+  const selectedUsageId = searchParams.get("selectedUsageId");
 
   const [tab, setTab] = useState<"pendiente" | "completado">("pendiente")
   const [usos, setUsos] = useState<UsoRepuestoItem[]>([])
@@ -50,9 +53,8 @@ export default function UsosRepuestosPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [selectedUso, setSelectedUso] = useState<UsoRepuestoItem | null>(null)
-  const { equipos } = useEquipos()
-  const [machineDialogOpen, setMachineDialogOpen] = useState(false)
-  const [selectedMachine, setSelectedMachine] = useState<any | null>(null)
+  const { equipos, loading: equiposLoading } = useEquipos()
+  const [selectedMachineCode, setSelectedMachineCode] = useState<string | null>(null)
   const [descripcionTmp, setDescripcionTmp] = useState("")
   const [expandedUsoId, setExpandedUsoId] = useState<number | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -69,22 +71,116 @@ export default function UsosRepuestosPage() {
     }
   }, [])
 
+  // Manejar selección de uso de repuesto desde notificaciones (Navegación y apertura automática)
+  useEffect(() => {
+    if (!selectedUsageId) return;
+
+    const usoId = parseInt(selectedUsageId, 10);
+    if (isNaN(usoId)) return;
+
+    // Si ya tenemos los usos, buscar directamente
+    if (usos.length > 0) {
+      const uso = usos.find((u) => u.id === usoId);
+      if (uso) {
+        // Abrir el modal de detalles o completar según el estado
+        if (uso.estado === 'pendiente') {
+          openCompletarDialog(uso);
+        } else {
+          // Para usos completados, simplemente expandir la fila
+          setExpandedUsoId(usoId);
+        }
+
+        // Limpiar la URL para que no se vuelva a abrir al recargar
+        const params = new URLSearchParams(window.location.search);
+        params.delete('selectedUsageId');
+        const newUrl = params.toString() ? `/dashboard/usos-repuestos?${params.toString()}` : '/dashboard/usos-repuestos';
+        window.history.replaceState(null, '', newUrl);
+      }
+    }
+    // Si no tenemos usos aún, el efecto de carga de usos se encargará de buscarlo
+    // cuando se completen los usos
+  }, [selectedUsageId, usos, openCompletarDialog]);
+
   useEffect(() => {
     async function loadUsos() {
       setLoading(true)
       setError(null)
       try {
-        const params = new URLSearchParams({ estado: tab })
-        if (categoriaFilter) params.append("categoria", categoriaFilter)
-        if (subcategoriaFilter) params.append("subcategoria", subcategoriaFilter)
-        if (maquinaFilter.trim()) params.append("maquina", maquinaFilter.trim())
+        // Si tenemos un selectedUsageId, necesitamos buscar en ambos estados para encontrarlo
+        if (selectedUsageId) {
+          // Primero intentamos buscar en el estado actual
+          const params = new URLSearchParams({ estado: tab })
+          if (categoriaFilter) params.append("categoria", categoriaFilter)
+          if (subcategoriaFilter) params.append("subcategoria", subcategoriaFilter)
+          if (maquinaFilter.trim()) params.append("maquina", maquinaFilter.trim())
 
-        const res = await fetch(`/api/uso-repuesto?${params.toString()}`)
-        const json = await res.json()
-        if (!res.ok) {
-          throw new Error(json.error || "No se pudieron cargar los usos de repuestos")
+          const res = await fetch(`/api/uso-repuesto?${params.toString()}`)
+          const json = await res.json()
+          if (!res.ok) {
+            throw new Error(json.error || "No se pudieron cargar los usos de repuestos")
+          }
+
+          const usosData = Array.isArray(json.data) ? json.data : []
+          setUsos(usosData)
+
+          // Buscar el uso específico en los resultados
+          const usoId = parseInt(selectedUsageId, 10);
+          const foundUso = usosData.find((u: UsoRepuestoItem) => u.id === usoId);
+
+          // Si no lo encontramos y no estamos en la pestaña de completados, intentamos en completados
+          if (!foundUso && tab !== "completado") {
+            const paramsCompletados = new URLSearchParams({ estado: "completado" })
+            if (categoriaFilter) paramsCompletados.append("categoria", categoriaFilter)
+            if (subcategoriaFilter) paramsCompletados.append("subcategoria", subcategoriaFilter)
+            if (maquinaFilter.trim()) paramsCompletados.append("maquina", maquinaFilter.trim())
+
+            const resCompletados = await fetch(`/api/uso-repuesto?${paramsCompletados.toString()}`)
+            const jsonCompletados = await resCompletados.json()
+            if (resCompletados.ok) {
+              const usosCompletados = Array.isArray(jsonCompletados.data) ? jsonCompletados.data : []
+              const foundCompletado = usosCompletados.find((u: UsoRepuestoItem) => u.id === usoId);
+
+              if (foundCompletado) {
+                // Cambiar a la pestaña de completados para mostrar el uso
+                setTab("completado")
+                setUsos(usosCompletados)
+              }
+            }
+          }
+          // Si no lo encontramos y no estamos en la pestaña de pendientes, intentamos en pendientes
+          else if (!foundUso && tab !== "pendiente") {
+            const paramsPendientes = new URLSearchParams({ estado: "pendiente" })
+            if (categoriaFilter) paramsPendientes.append("categoria", categoriaFilter)
+            if (subcategoriaFilter) paramsPendientes.append("subcategoria", subcategoriaFilter)
+            if (maquinaFilter.trim()) paramsPendientes.append("maquina", maquinaFilter.trim())
+
+            const resPendientes = await fetch(`/api/uso-repuesto?${paramsPendientes.toString()}`)
+            const jsonPendientes = await resPendientes.json()
+            if (resPendientes.ok) {
+              const usosPendientes = Array.isArray(jsonPendientes.data) ? jsonPendientes.data : []
+              const foundPendiente = usosPendientes.find((u: UsoRepuestoItem) => u.id === usoId);
+
+              if (foundPendiente) {
+                // Cambiar a la pestaña de pendientes para mostrar el uso
+                setTab("pendiente")
+                setUsos(usosPendientes)
+              }
+            }
+          }
+        } else {
+          // Comportamiento normal si no hay selectedUsageId
+          const params = new URLSearchParams({ estado: tab })
+          if (categoriaFilter) params.append("categoria", categoriaFilter)
+          if (subcategoriaFilter) params.append("subcategoria", subcategoriaFilter)
+          if (maquinaFilter.trim()) params.append("maquina", maquinaFilter.trim())
+
+          const res = await fetch(`/api/uso-repuesto?${params.toString()}`)
+          const json = await res.json()
+          if (!res.ok) {
+            throw new Error(json.error || "No se pudieron cargar los usos de repuestos")
+          }
+          setUsos(Array.isArray(json.data) ? json.data : [])
         }
-        setUsos(Array.isArray(json.data) ? json.data : [])
       } catch (err: any) {
         console.error("Error cargando usos de repuestos", err)
         setError(err?.message || "Error cargando usos de repuestos")
@@ -94,7 +190,7 @@ export default function UsosRepuestosPage() {
     }
 
     loadUsos()
-  }, [tab, categoriaFilter, subcategoriaFilter, maquinaFilter])
+  }, [tab, categoriaFilter, subcategoriaFilter, maquinaFilter, selectedUsageId])
 
   function openCompletarDialog(u: UsoRepuestoItem) {
     setSelectedUso(u)
@@ -102,23 +198,12 @@ export default function UsosRepuestosPage() {
     setDialogOpen(true)
   }
 
-    function openMachineDialog(codigo: string) {
-    const eq = equipos.find((e: any) => e.codigo === codigo)
-    if (!eq) {
-      toast({
-        title: "Equipo no encontrado",
-        description: "No se encontró un equipo con ese código.",
-        variant: "destructive",
-      })
-      return
-    }
-    setSelectedMachine(eq)
-    setMachineDialogOpen(true)
+  function openMachineDialog(codigo: string) {
+    setSelectedMachineCode(codigo)
   }
 
   function closeMachineDialog() {
-    setMachineDialogOpen(false)
-    setSelectedMachine(null)
+    setSelectedMachineCode(null)
   }
 
   function closeCompletarDialog() {
@@ -176,72 +261,27 @@ export default function UsosRepuestosPage() {
         description: "Se registró la descripción del uso y el registro pasó a completados.",
       })
 
-      // Crear notificación para la campana
+      // Crear notificación persistente y de navegador
       try {
-        const baseNotif = {
-          title: `Uso de repuesto completado`,
-          message:
-            `Repuesto: ${selectedUso.repuestoCodigo}${selectedUso.repuestoNombre ? ` - ${selectedUso.repuestoNombre}` : ""}` +
-            `\nMáquina: ${selectedUso.maquinaLabel || selectedUso.maquinaCodigo}` +
-            `\nResponsable: ${selectedUso.responsable}`,
-          type: "task_alert" as const,
-          severity: "info" as const,
-          refId: String(selectedUso.id),
-          status: "Completada" as const,
-        }
+        const notifTitle = `Uso de repuesto completado`;
+        const notifMessage = `Repuesto: ${selectedUso.repuestoCodigo}${selectedUso.repuestoNombre ? ` - ${selectedUso.repuestoNombre}` : ""}\nMáquina: ${selectedUso.maquinaLabel || selectedUso.maquinaCodigo}\nResponsable: ${selectedUso.responsable}`;
 
-        let finalNotif: Notification | null = null
+        // Guardar notificación en la BD
+        await fetch(`${window.location.origin}/api/notificaciones`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            titulo: notifTitle,
+            mensaje: notifMessage,
+            tipo: "spare_part_usage",
+            severidad: "info",
+            estado_tarea: "Completada",
+            ref_task_id: selectedUso.id ?? null,
+          }),
+        });
 
-        // Guardar notificación en la BD y usar el id real devuelto
-        try {
-          const resNotif = await fetch("/api/notificaciones", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              titulo: baseNotif.title,
-              mensaje: baseNotif.message,
-              tipo: baseNotif.type,
-              severidad: baseNotif.severity,
-              estado_tarea: baseNotif.status,
-              prioridad: null,
-              ref_task_id: selectedUso.id ?? null,
-            }),
-          })
-
-          if (resNotif.ok) {
-            const jsonNotif = await resNotif.json()
-            const saved = jsonNotif.data
-            finalNotif = {
-              id: String(saved.id),
-              title: baseNotif.title,
-              message: baseNotif.message,
-              type: baseNotif.type,
-              severity: baseNotif.severity,
-              createdAt: new Date(saved.creado_en).toISOString(),
-              read: false,
-              refId: String(saved.ref_task_id ?? baseNotif.refId ?? ""),
-              status: baseNotif.status,
-            }
-          }
-        } catch (e) {
-          console.warn("No se pudo guardar la notificación de uso completado en BD", e)
-        }
-
-        const notif: Notification =
-          finalNotif ?? {
-            id: `uso-completado-${selectedUso.id}-${Date.now()}`,
-            title: baseNotif.title,
-            message: baseNotif.message,
-            type: baseNotif.type,
-            severity: baseNotif.severity,
-            createdAt: new Date().toISOString(),
-            read: false,
-            refId: baseNotif.refId,
-            status: baseNotif.status,
-          }
-
-        // Actualizar contexto en memoria
-        addNotification(notif)
+        // Refrescar la lista de notificaciones en la campana
+        if (refreshNotifications) refreshNotifications();
 
         // Notificación del navegador (si el usuario la permitió)
         if (
@@ -249,9 +289,25 @@ export default function UsosRepuestosPage() {
           typeof window !== "undefined" &&
           "Notification" in window
         ) {
-          new Notification(notif.title, {
-            body: notif.message,
-          })
+          const notification = new Notification(notifTitle, {
+            body: notifMessage,
+            tag: `uso-completado-${selectedUso.id}`,
+            data: {
+              url: `/dashboard/usos-repuestos?selectedUsageId=${selectedUso.id}`,
+              type: "spare_part_usage",
+              spareUsageId: selectedUso.id,
+              repuestoId: selectedUso.id
+            }
+          });
+
+          notification.addEventListener('click', (event) => {
+            event.preventDefault();
+            window.focus();
+            // Navegar a la URL específica
+            if (notification.data?.url) {
+              window.location.href = notification.data.url;
+            }
+          });
         }
       } catch (e) {
         console.warn("No se pudo crear la notificación de uso completado", e)
@@ -303,6 +359,10 @@ export default function UsosRepuestosPage() {
       setUsoIdToDelete(null)
     }
   }
+
+  const selectedMachine = selectedMachineCode
+    ? equipos.find((e: any) => e.codigo === selectedMachineCode)
+    : null
 
   return (
     <div className="mx-auto max-w-6xl px-3 sm:px-4">
@@ -428,7 +488,7 @@ export default function UsosRepuestosPage() {
           )}
 
           {!loading && !error && (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto hidden sm:block">
               <table className="min-w-full border text-xs">
                 <thead className="bg-muted/50">
                   <tr>
@@ -572,6 +632,102 @@ export default function UsosRepuestosPage() {
               </table>
             </div>
           )}
+
+          {/* Vista móvil (Tarjetas) */}
+          {!loading && !error && (
+            <div className="sm:hidden space-y-3">
+              {usos.length === 0 ? (
+                <div className="text-center text-xs text-muted-foreground py-4 border rounded-md bg-muted/10">
+                  No hay usos {tab === "pendiente" ? "pendientes" : "completados"} para mostrar.
+                </div>
+              ) : (
+                usos.map((u) => (
+                  <div key={u.id} className="rounded-md border bg-card p-3 text-xs shadow-sm">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="font-medium text-sm text-primary">
+                        {u.repuestoCodigo}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {new Date(u.createdAt).toLocaleDateString()}
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-1.5 mb-3">
+                      <div className="text-muted-foreground">
+                        {u.repuestoNombre && <span className="block text-foreground font-medium">{u.repuestoNombre}</span>}
+                        <span className="italic">{u.repuestoDescripcion || "Sin descripción"}</span>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-2 bg-muted/30 p-2 rounded">
+                        <div>
+                          <span className="block text-[10px] text-muted-foreground">Máquina</span>
+                          <button
+                            type="button"
+                            className="text-blue-700 font-medium hover:underline text-left truncate w-full"
+                            onClick={() => openMachineDialog(u.maquinaCodigo)}
+                          >
+                            {u.maquinaLabel || u.maquinaCodigo}
+                          </button>
+                        </div>
+                        <div>
+                          <span className="block text-[10px] text-muted-foreground">Cantidad</span>
+                          <span className="font-medium">{u.cantidad}</span>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="block text-[10px] text-muted-foreground">Responsable</span>
+                          <span className="font-medium">{u.responsable}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 mt-2 pt-2 border-t">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 px-2 text-xs"
+                        onClick={() => setExpandedUsoId((prev) => (prev === u.id ? null : u.id))}
+                      >
+                        {expandedUsoId === u.id ? "Ocultar detalles" : "Ver detalles"}
+                      </Button>
+
+                      {tab === "pendiente" && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-8 px-3 text-xs"
+                          onClick={() => openCompletarDialog(u)}
+                        >
+                          Completar
+                        </Button>
+                      )}
+                      
+                      {tab === "completado" && isAdmin && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-2 text-xs text-red-600 border-red-200 hover:bg-red-50"
+                          onClick={() => openDeleteUsoDialog(u.id)}
+                        >
+                          Eliminar
+                        </Button>
+                      )}
+                    </div>
+
+                    {expandedUsoId === u.id && (
+                      <div className="mt-2 pt-2 border-t text-[11px] space-y-1 bg-muted/20 -mx-3 -mb-3 p-3 rounded-b-md">
+                        <div><span className="font-semibold">Descripción uso:</span> {u.descripcionUso || "Sin descripción"}</div>
+                        <div><span className="font-semibold">Categoría:</span> {u.categoria || "-"} / {u.subcategoria || "-"}</div>
+                        {u.completadoAt && <div><span className="font-semibold">Completado:</span> {new Date(u.completadoAt).toLocaleString()}</div>}
+                        {u.completadoPor && <div><span className="font-semibold">Por:</span> {u.completadoPor}</div>}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -651,9 +807,11 @@ export default function UsosRepuestosPage() {
       {/* Dialog para información de la máquina */}
       <EquipmentDetailModal
         equipment={selectedMachine as any}
-        isOpen={machineDialogOpen && !!selectedMachine}
+        isOpen={!!selectedMachineCode}
         onClose={closeMachineDialog}
         title={selectedMachine ? `Equipo: ${selectedMachine.nombre || selectedMachine.codigo}` : undefined}
+        showHojaDeVidaButton={true}
+        isLoading={!!selectedMachineCode && equiposLoading}
       />
 
       {/* Dialog para confirmar eliminación de uso completado */}

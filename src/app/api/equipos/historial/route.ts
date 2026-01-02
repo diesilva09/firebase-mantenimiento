@@ -1,76 +1,90 @@
 import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
+import { z } from 'zod'
 
-// POST /api/equipos/historial
-// Crea un registro de hoja de vida en la tabla equipos_historial
+const historialSchema = z.object({
+  // En equipos_historial la columna codigo_equipo es NOT NULL, así que aquí también
+  codigo_equipo: z.string(),
+  tarea_id: z.number().optional().nullable(),
+  // Permitimos null y luego ponemos un valor por defecto si falta
+  fecha_evento: z.coerce.date().optional().nullable(),
+  labor: z.string(),
+  tipo_mantenimiento: z.string().optional().nullable(),
+  repuestos_usados: z.string().optional().nullable(),
+  observaciones: z.string().optional().nullable(),
+  ejecutado_por: z.string().optional().nullable(),
+  creado_por: z.string().optional().nullable(),
+})
+
 export async function POST(req: Request) {
-  if (!process.env.DATABASE_URL) {
-    return NextResponse.json({ error: 'Base de datos no configurada' }, { status: 500 })
-  }
-
   try {
     const body = await req.json()
 
-    const {
-      codigoEquipo,
-      tareaId,
-      fechaEvento,
-      labor,
-      tipoMantenimiento,
-      repuestosUsados,
-      observaciones,
-      ejecutadoPor,
-      creadoPor,
-    } = body || {}
-
-    if (!codigoEquipo || !labor) {
-      return NextResponse.json({ error: 'codigoEquipo y labor son requeridos' }, { status: 400 })
+    // Normalizar payload desde el frontend (usa camelCase)
+    const normalized: any = {
+      codigo_equipo: body.codigo_equipo ?? body.codigoEquipo ?? null,
+      tarea_id: body.tarea_id ?? body.tareaId ?? null,
+      fecha_evento: body.fecha_evento ?? body.fechaEvento ?? null,
+      labor: body.labor,
+      tipo_mantenimiento: body.tipo_mantenimiento ?? body.tipoMantenimiento ?? null,
+      repuestos_usados: body.repuestos_usados ?? body.repuestosUsados ?? null,
+      observaciones: body.observaciones ?? body.observaciones ?? null,
+      ejecutado_por: body.ejecutado_por ?? body.ejecutadoPor ?? null,
+      creado_por: body.creado_por ?? body.creadoPor ?? null,
     }
 
-    const values: any[] = []
-    const columns: string[] = []
-    const placeholders: string[] = []
-
-    const pushField = (column: string, value: any) => {
-      if (value !== undefined && value !== null) {
-        columns.push(column)
-        values.push(value)
-        placeholders.push(`$${values.length}`)
-      }
+    // codigo_equipo es obligatorio: si no viene, devolvemos 400 en vez de insertar NULL
+    if (!normalized.codigo_equipo) {
+      return NextResponse.json(
+        { error: 'codigo_equipo es obligatorio para equipos_historial' },
+        { status: 400 },
+      )
     }
 
-    pushField('codigo_equipo', codigoEquipo)
-    pushField('tarea_id', tareaId ? Number(tareaId) : null)
-    pushField('fecha_evento', fechaEvento || new Date().toISOString())
-    pushField('labor', labor)
-    pushField('tipo_mantenimiento', tipoMantenimiento ?? null)
-    pushField('repuestos_usados', repuestosUsados ?? null)
-    pushField('observaciones', observaciones ?? null)
-    pushField('ejecutado_por', ejecutadoPor ?? null)
-    pushField('creado_por', creadoPor ?? null)
+    if (!normalized.fecha_evento) {
+      // Usar fecha actual si no se envía explícitamente
+      normalized.fecha_evento = new Date().toISOString()
+    }
 
-    const sql = `
-      INSERT INTO equipos_historial (${columns.join(', ')})
-      VALUES (${placeholders.join(', ')})
-      RETURNING *
-    `
-
-    const { rows } = await query(sql, values)
-
+    const data = historialSchema.parse(normalized)
+    const { rows } = await query(
+      `INSERT INTO equipos_historial (
+         codigo_equipo,
+         tarea_id,
+         fecha_evento,
+         labor,
+         tipo_mantenimiento,
+         repuestos_usados,
+         observaciones,
+         ejecutado_por,
+         creado_por
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9
+       )
+       RETURNING *`,
+      [
+        data.codigo_equipo,
+        data.tarea_id ?? null,
+        data.fecha_evento ?? new Date(),
+        data.labor,
+        data.tipo_mantenimiento ?? null,
+        data.repuestos_usados ?? null,
+        data.observaciones ?? null,
+        data.ejecutado_por ?? null,
+        data.creado_por ?? null,
+      ],
+    )
     return NextResponse.json({ data: rows[0] })
   } catch (err) {
     console.error('Error creando registro en equipos_historial:', err)
+    if (err instanceof z.ZodError) {
+      return NextResponse.json({ error: 'Datos de entrada inválidos', details: err.errors }, { status: 400 })
+    }
     return NextResponse.json({ error: 'Error creando registro en equipos_historial' }, { status: 500 })
   }
 }
 
-// GET /api/equipos/historial?codigoEquipo=EQ-123
-// Devuelve el historial de un equipo ordenado por fecha_evento DESC
 export async function GET(req: Request) {
-  if (!process.env.DATABASE_URL) {
-    return NextResponse.json({ data: [], message: 'Base de datos no configurada' }, { status: 500 })
-  }
-
   try {
     const { searchParams } = new URL(req.url)
     const codigoEquipo = searchParams.get('codigoEquipo')
@@ -80,24 +94,10 @@ export async function GET(req: Request) {
     }
 
     const { rows } = await query(
-      `
-      SELECT 
-        id,
-        codigo_equipo,
-        tarea_id,
-        fecha_evento,
-        labor,
-        tipo_mantenimiento,
-        repuestos_usados,
-        observaciones,
-        ejecutado_por,
-        creado_por,
-        created_at
-      FROM equipos_historial
-      WHERE codigo_equipo = $1
-      ORDER BY fecha_evento DESC, id DESC
-      `,
-      [codigoEquipo]
+      `SELECT * FROM equipos_historial
+       WHERE codigo_equipo = $1
+       ORDER BY fecha_evento DESC, id DESC`,
+      [codigoEquipo],
     )
 
     return NextResponse.json({ data: rows })

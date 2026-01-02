@@ -13,6 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { formatPrice } from '@/lib/utils'
 import { ArrowLeft, Folder, Eye } from "lucide-react"
 
 interface HojaVidaRow {
@@ -865,14 +866,7 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
                     </td>
                     <td className="px-3 py-2 align-top">{r.cantidad}</td>
                     <td className="px-3 py-2 align-top">
-                      {r.precio !== null && r.precio !== undefined 
-                        ? new Intl.NumberFormat('es-CO', { 
-                            style: 'currency', 
-                            currency: 'COP',
-                            minimumFractionDigits: 0,
-                            maximumFractionDigits: 0 
-                          }).format(r.precio)
-                        : "-"}
+                      {formatPrice(r.precio)}
                     </td>
                     <td className="px-3 py-2 align-top">{r.ubicacion || "-"}</td>
                     <td className="px-3 py-2 align-top text-right">
@@ -954,14 +948,7 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
                             <div className="flex gap-2">
                               <span className="font-medium text-muted-foreground shrink-0">Precio:</span>
                               <span>
-                                {r.precio !== null && r.precio !== undefined 
-                                  ? new Intl.NumberFormat('es-CO', { 
-                                      style: 'currency', 
-                                      currency: 'COP',
-                                      minimumFractionDigits: 0,
-                                      maximumFractionDigits: 0 
-                                    }).format(r.precio)
-                                  : "-"}
+                                {formatPrice(r.precio)}
                               </span>
                             </div>
                             <div className="flex gap-2">

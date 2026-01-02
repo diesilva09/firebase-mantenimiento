@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { MoreHorizontal, Wrench, Edit, Trash2 } from "lucide-react"
+import { MoreHorizontal, Wrench, Edit, Trash2, Loader2 } from "lucide-react"
 import {
   Table,
   TableBody,
@@ -40,6 +40,7 @@ interface TaskTableViewProps {
   onDeleteTask: (taskId: string) => void;
   onOpenSpecs: (task: Task) => void;
   onTaskClick: (task: Task) => void;
+  loadingSpecsId?: string | null;
   seenCompletedIds: string[];
   onCompletedSeen: (taskIds: string[]) => void;
 }
@@ -63,7 +64,8 @@ function TaskTable({
   onOpenEdit, 
   onDeleteTask, 
   onOpenSpecs, 
-  onTaskClick 
+  onTaskClick,
+  loadingSpecsId
 }: { 
   tasks: Task[], 
   isAdmin: boolean,
@@ -71,7 +73,8 @@ function TaskTable({
   onOpenEdit: (task: Task) => void,
   onDeleteTask: (taskId: string) => void,
   onOpenSpecs: (task: Task) => void, 
-  onTaskClick: (task: Task) => void 
+  onTaskClick: (task: Task) => void,
+  loadingSpecsId?: string | null
 }) {
   if (tasks.length === 0) {
     return (
@@ -105,13 +108,15 @@ function TaskTable({
                     <TableCell className="font-medium">
                       <button
                         type="button"
-                        className="text-primary hover:underline"
+                        className="text-primary hover:underline flex items-center gap-2"
                         onClick={(e) => {
                           e.stopPropagation();
                           onOpenSpecs(task);
                         }}
+                        disabled={loadingSpecsId === task.id}
                       >
                         {task.code}
+                        {loadingSpecsId === task.id && <Loader2 className="h-3 w-3 animate-spin" />}
                       </button>
                     </TableCell>
                     <TableCell className="align-top w-full sm:w-1/2">
@@ -122,6 +127,7 @@ function TaskTable({
                         e.stopPropagation();
                         onOpenSpecs(task);
                       }}
+                      disabled={loadingSpecsId === task.id}
                     >
                       {task.description}
                     </button>
@@ -205,7 +211,13 @@ function TaskTable({
                         )}
                         {task.equipmentSpecs && (
                           <DropdownMenuItem onSelect={() => onOpenSpecs(task)}>
-                            Ver Ficha Técnica
+                            {loadingSpecsId === task.id ? (
+                              <span className="flex items-center gap-2">
+                                <Loader2 className="h-3 w-3 animate-spin" /> Cargando...
+                              </span>
+                            ) : (
+                              "Ver Ficha Técnica"
+                            )}
                           </DropdownMenuItem>
                         )}
                         {isAdmin && (
@@ -389,7 +401,7 @@ export function TaskTableView({ tasks, seenCompletedIds, onCompletedSeen, ...pro
     <Card>
       <CardContent className="p-0 sm:p-6">
         <Tabs defaultValue="Maquinaria" className="pt-6">
-          <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2 md:grid-cols-4 h-auto">
+          <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 h-auto gap-1 sm:gap-0">
             {schedules.map(schedule => (
                 <TabsTrigger
                   key={schedule}

@@ -22,6 +22,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Eye, MoreHorizontal } from "lucide-react"
 import { initializeFirebase } from "@/firebase"
+import { useNotificationsContext as useNotifications } from "@/context/notifications-context"
+import { EquipmentDetailModal } from "@/components/equipment-detail-modal"
+import type { Notification } from "@/lib/types"
 
 // helper
 async function getAuthHeaders() {
@@ -38,75 +41,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-
-export const repuestoSchema = z.object({
-  codigo: z.string().min(1, "Requerido"),
-
-  // descripción del repuesto
-  nombre: z.string().min(1, "Requerido"),
-
-  // Clasificación
-  categoria: z.enum(["Mecanico", "Neumatico", "Electrico", "Otro"], {
-    required_error: "Seleccione una categoría",
-  }),
-  subcategoria: z.string().optional(),     // luego la llenaremos por categoría
-
-  // Datos de compra
-  codigoCompra: z.string().optional(),
-  proveedor: z.string().optional(),
-  precio: z
-    .number({ invalid_type_error: "Debe ser un número" })
-    .min(0, "No puede ser negativo")
-    .optional(),
-
-  // Stock
-  unidad: z.string().min(1, "Requerido"),  // Unidad, Juego, Metro, Litro…
-  stockMaximo: z
-    .number({ invalid_type_error: "Debe ser un número" })
-    .min(0, "No puede ser negativo"),
-  stockMinimo: z
-    .number({ invalid_type_error: "Debe ser un número" })
-    .min(0, "No puede ser negativo"),
-  stockActual: z
-    .number({ invalid_type_error: "Debe ser un número" })
-    .min(0, "No puede ser negativo"),
-
-  // Otros opcionales
-  ubicacion: z.string().optional(),
-  marca: z.string().optional(),
-  modelo: z.string().optional(),
-  notas: z.string().optional(),
-  descripcion: z.string().optional(),
-
-  // Imagen (archivo en el formulario)
-  imagen: z.any().optional(),
-})
-
-export type RepuestoForm = z.infer<typeof repuestoSchema>
-
-export type RepuestoItem = RepuestoForm & {
-  id: number
-  descripcion?: string | null
-  imagen_url?: string | null
-  stockInicial: number
-  precio?: number | null
-}
-
-export const CATEGORIAS = ["Mecanico", "Neumatico", "Electrico", "Otro"] as const
-
-export const CATEGORIA_LABELS: Record<(typeof CATEGORIAS)[number], string> = {
-  Mecanico: "Mecánico",
-  Neumatico: "Neumático",
-  Electrico: "Eléctrico",
-  Otro: "Otro",
-}
-
-export const CATEGORIA_SUBCATEGORIAS: Record<string, string[]> = {
-  Mecanico: ["Rodamientos", "Correas", "Engranes", "Estructuras"],
-  Neumatico: ["Válvulas", "Cilindros", "Racores", "Mangueras"],
-  Electrico: ["Sensores", "Motores", "Contactores", "Interruptores", "Cableado"],
-  // Por ahora 'Otro' sin subcategorías predefinidas
-}
+import { formatPrice } from '@/lib/utils'
+import { repuestoSchema, RepuestoForm, RepuestoItem, CATEGORIAS, CATEGORIA_LABELS, CATEGORIA_SUBCATEGORIAS } from '@/lib/repuestos'
 
 // helper
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -131,6 +67,8 @@ export default function InventarioPage() {
   const [errorRepuestos, setErrorRepuestos] = useState<string | null>(null)
   const [expandedCategoria, setExpandedCategoria] = useState<string | null>(null)
   const [subcategoriaFilters, setSubcategoriaFilters] = useState<Record<string, string>>({})
+  const [highlightedRowId, setHighlightedRowId] = useState<number | null>(null)
+  const [pulseHighlightId, setPulseHighlightId] = useState<number | null>(null)
 
   const { user } = useUser()
 
@@ -169,9 +107,48 @@ export default function InventarioPage() {
   const [usoDescripcion, setUsoDescripcion] = useState("")
   const [usoMaquinaSeleccionada, setUsoMaquinaSeleccionada] = useState<any | null>(null)
   const { toast } = useToast()
-  const { equipos } = useEquipos()
+  const { equipos, loading: equiposLoading } = useEquipos()
   const [usoMaquinaFocused, setUsoMaquinaFocused] = useState(false)
-  const { setSuggestions } = useDashboardSearch()
+  const { suggestions, highlightedSuggestionId, setQuery, setSuggestions, setHighlightedSuggestionId } = useDashboardSearch()
+  const { permission, requestPermission, refreshNotifications } = useNotifications()
+  const [machineDetailCode, setMachineDetailCode] = useState<string | null>(null)
+
+  // Si la página fue recargada (reload), limpiamos la búsqueda global para no mantener
+  // la sugerencia resaltada ni el texto de búsqueda.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const navEntries = (performance && (performance as any).getEntriesByType)
+        ? (performance as any).getEntriesByType('navigation')
+        : null
+
+      const isReload = (navEntries && navEntries[0] && navEntries[0].type === 'reload') ||
+        (performance as any).navigation?.type === 1
+
+      if (isReload) {
+        setQuery('')
+        setSuggestions([])
+        setHighlightedSuggestionId(null)
+        // Ensure no category remains expanded after a reload
+        setExpandedCategoria(null)
+
+        // If the URL contains selectedRepuestoId, remove it to avoid auto-expanding after reload
+        try {
+          const params = new URLSearchParams(window.location.search)
+          if (params.has('selectedRepuestoId')) {
+            params.delete('selectedRepuestoId')
+            const queryString = params.toString()
+            const newUrl = queryString ? `/dashboard/inventario?${queryString}` : '/dashboard/inventario'
+            window.history.replaceState(null, '', newUrl)
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [setQuery, setSuggestions, setHighlightedSuggestionId])
 
   const maquinaSuggestions = React.useMemo(() => {
     const term = usoMaquina.trim().toLowerCase()
@@ -287,6 +264,77 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
     })
   }, [repuestos, setSuggestions])
 
+  // Cuando el search context indica una sugerencia resaltada, mostramos un preview en la tabla
+  useEffect(() => {
+    if (!highlightedSuggestionId) {
+      setHighlightedRowId(null)
+      return
+    }
+
+    const sug = suggestions.find((s) => s.id === highlightedSuggestionId && s.type === 'repuesto')
+    if (!sug) {
+      setHighlightedRowId(null)
+      return
+    }
+
+    const targetId = Number(sug.id)
+    if (!targetId) {
+      setHighlightedRowId(null)
+      return
+    }
+
+    const target = repuestos.find((r) => r.id === targetId)
+    if (!target) {
+      // Not loaded yet
+      setHighlightedRowId(null)
+      return
+    }
+
+    // Expand category so the row is visible
+    setExpandedCategoria(target.categoria)
+    if (target.subcategoria) {
+      setSubcategoriaFilters((prev) => ({ ...prev, [target.categoria]: target.subcategoria || "" }))
+    }
+
+    // Scroll into view and set highlighted id
+    setHighlightedRowId(targetId)
+    // Pulse this highlight briefly so it is more visible in large lists
+    setPulseHighlightId(targetId)
+    if (typeof window !== 'undefined') {
+      // Clear pulse after 2.5s
+      const t = window.setTimeout(() => setPulseHighlightId(null), 2500)
+      return () => window.clearTimeout(t)
+    }
+    const el = typeof document !== 'undefined' ? document.getElementById(`repuesto-${targetId}`) : null
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [highlightedSuggestionId, suggestions, repuestos])
+
+  // Asegurar que siempre que cambie highlightedRowId scrollemos al elemento
+  // correspondiente (esto cubre ediciones y guardados, donde highlight se
+  // establece programáticamente en lugar de venir del buscador global).
+  useEffect(() => {
+    if (!highlightedRowId) return
+    const target = repuestos.find((r) => r.id === highlightedRowId)
+    if (!target) return
+
+    // Expandir categoría/subcategoría para garantizar visibilidad
+    setExpandedCategoria(target.categoria)
+    if (target.subcategoria) {
+      setSubcategoriaFilters((prev) => ({ ...prev, [target.categoria]: target.subcategoria || "" }))
+    }
+
+    if (typeof document === 'undefined') return
+    // Intentar seleccionar el elemento de tabla, si no existe, el card en móvil
+    const el = document.getElementById(`repuesto-${highlightedRowId}`) || document.getElementById(`repuesto-${highlightedRowId}-card`)
+    if (el) {
+      // Si el elemento está dentro de un contenedor con overflow, el scrollIntoView
+      // debería funcionar correctamente en la mayoría de casos.
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [highlightedRowId, repuestos])
+
   // Si venimos desde el buscador global con un repuesto seleccionado,
   // expandir su categoría y subcategoría para que sea visible.
   useEffect(() => {
@@ -307,6 +355,9 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
         [target.categoria]: target.subcategoria || "",
       }))
     }
+    // Marcar este repuesto como resaltado para que el borde azul se mantenga visible
+    // incluso después de limpiar el parámetro de la URL.
+    setHighlightedRowId(targetId)
   }, [selectedRepuestoIdFromQuery, repuestos])
 
   // Scroll automático hasta la fila del repuesto buscado y limpiar el parámetro
@@ -456,6 +507,18 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
           ? "Los datos del repuesto se actualizaron correctamente."
           : "El repuesto se registró correctamente en el inventario.",
       })
+      // Asegurarnos de que el repuesto recién creado/actualizado quede resaltado
+      if (item && typeof item.id !== 'undefined') {
+        setHighlightedRowId(item.id)
+        setPulseHighlightId(item.id)
+        if (typeof window !== 'undefined') {
+          const t = window.setTimeout(() => setPulseHighlightId(null), 2500)
+          // noop: allow timeout to clear
+        }
+        // Expandir/cargar categoría si es necesario
+        setExpandedCategoria(item.categoria)
+        if (item.subcategoria) setSubcategoriaFilters((prev) => ({ ...prev, [item.categoria]: item.subcategoria }))
+      }
     } catch (err) {
       console.error(err)
       toast({
@@ -487,6 +550,34 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
       notas: repuesto.notas || "",
       imagen: undefined,
     })
+    // Cuando abrimos el editor, asegurarnos de que el repuesto que se edita
+    // quede resaltado y visible (en lugar de dejar resaltado otro repuesto).
+    if (typeof window !== 'undefined') {
+      // Limpiar cualquier sugerencia global resaltada para evitar volver a resaltar otra fila
+      try {
+        setHighlightedSuggestionId(null)
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    setExpandedCategoria(repuesto.categoria)
+    if (repuesto.subcategoria) {
+      setSubcategoriaFilters((prev) => ({ ...prev, [repuesto.categoria]: repuesto.subcategoria || "" }))
+    }
+
+    setHighlightedRowId(repuesto.id)
+    setPulseHighlightId(repuesto.id)
+    if (typeof window !== 'undefined') {
+      const t = window.setTimeout(() => setPulseHighlightId(null), 2500)
+      // clear timeout when dialog closes; store in local scope via closure is fine
+      // we'll not keep reference here (small timeout)
+    }
+
+    // Intentar scrollear al elemento si está en el DOM
+    const el = typeof document !== 'undefined' ? document.getElementById(`repuesto-${repuesto.id}`) : null
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
     setOpen(true)
   }
 
@@ -614,6 +705,8 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
 
       const updated = json.data?.updatedRepuesto
       const lowStock = Boolean(json.data?.lowStock)
+      const usageId = json.data?.usageId
+      const usageStatus = json.data?.usageStatus || "pendiente"
 
       if (updated && typeof updated.id !== "undefined") {
         setRepuestos((prev) =>
@@ -635,6 +728,37 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
         title: "Solicitud de uso registrada",
         description: `Se registró la solicitud de uso para el repuesto ${usoRepuesto.codigo}.`,
       })
+
+      // Refrescar notificaciones desde la BD para mostrar la nueva, y mostrar la del navegador
+      if (refreshNotifications) refreshNotifications();
+
+      try {
+        const notifTitle = `Uso de Repuesto ${usageStatus}`;
+        const notifMessage = `Responsable: ${usoResponsable.trim()}\nRepuesto: ${usoCantidad} x ${usoRepuesto.nombre}\nMáquina: ${maquinaLabel}`;
+        let currentPermission = permission;
+        if (currentPermission === 'default' && typeof window !== 'undefined' && 'Notification' in window) {
+          currentPermission = await requestPermission();
+        }
+
+        // Mostrar notificación del navegador
+        if (currentPermission === 'granted' && typeof window !== 'undefined' && 'Notification' in window) {
+          const browserNotif = new Notification(notifTitle, {
+            body: notifMessage,
+            tag: `uso-repuesto-${usageId}`,
+            data: { 
+              url: `${window.location.origin}/dashboard/usos-repuestos?selectedUsageId=${usageId}` 
+            }
+          });
+          
+          browserNotif.onclick = (event) => {
+            event.preventDefault();
+            window.focus();
+            if (browserNotif.data?.url) window.location.href = browserNotif.data.url;
+          };
+        }
+      } catch (e) {
+        console.warn("No se pudo crear la notificación de navegador para solicitud de uso", e)
+      }
 
       if (lowStock) {
         toast({
@@ -681,6 +805,11 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
     // Verde: por encima del doble del mínimo
     return "bg-emerald-200 border-l-4 border-emerald-500 font-semibold"
   }
+
+  const machineForDetail = machineDetailCode
+    ? equipos.find((e: any) => e.codigo === machineDetailCode)
+    : null
+
 
   return (
     <div className="mx-auto max-w-6xl px-3 sm:px-4">
@@ -747,8 +876,70 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                     </select>
                   </div>
                 )}
+                {/* Mobile: tarjetas compactas */}
+                <div className="sm:hidden space-y-3">
+                  {getRepuestosByCategoria("Mecanico").length === 0 ? (
+                    <div className="text-[11px] text-center text-muted-foreground">Aún no hay repuestos registrados en esta categoría.</div>
+                  ) : (
+                    getRepuestosByCategoria("Mecanico").map((r) => (
+                      <div
+                        key={`card-mecanico-${r.id}`}
+                        id={`repuesto-${r.id}-card`}
+                        className={`flex items-start gap-3 rounded-md border p-3 ${highlightedRowId === r.id ? 'border-blue-600 bg-blue-50 shadow-lg' : 'bg-card'}`}
+                      >
+                        <div className="w-12 flex-shrink-0">
+                          <button
+                            type="button"
+                            className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-md border bg-muted text-[11px] text-muted-foreground"
+                            onClick={() => openImagePreview(r.imagen_url)}
+                            disabled={!r.imagen_url}
+                          >
+                            {r.imagen_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={r.imagen_url} alt={r.codigo} className="h-full w-full object-cover" />
+                            ) : (
+                              <span className="text-xs">{(r.codigo || "?").slice(0, 2).toUpperCase()}</span>
+                            )}
+                          </button>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="truncate">
+                              <div className="text-sm font-medium">{r.codigo} • {r.nombre}</div>
+                              <div className="text-[11px] text-muted-foreground truncate">{r.descripcion}</div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-sm font-mono font-medium">{formatPrice(r.precio)}</div>
+                              <div className="text-[11px] text-muted-foreground">Stock: {r.stockActual}</div>
+                            </div>
+                          </div>
 
-                <div className="overflow-x-auto">
+                          <div className="mt-2 flex items-center gap-2">
+                            <Button type="button" variant="outline" size="sm" onClick={() => toggleDescripcion(r.id)}>
+                              <Eye className="h-3 w-3 mr-1" /> Ver
+                            </Button>
+                            {isAdmin && (
+                              <div className="ml-auto">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" size="sm"><MoreHorizontal className="h-3 w-3" /></Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="text-xs">
+                                    <DropdownMenuItem onClick={() => handleOpenUso(r)}>Uso</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleEdit(r)}>Editar</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleDelete(r.id)}>Borrar</DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="min-w-full border text-sm">
                     <thead className="bg-muted/50">
                       <tr>
@@ -773,7 +964,11 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                       ) : (
                         getRepuestosByCategoria("Mecanico").map((r) => (
                           <React.Fragment key={r.id}>
-                            <tr id={`repuesto-${r.id}`} className={`align-top ${getStockRowClass(r)}`}>
+                            <tr
+                              id={`repuesto-${r.id}`}
+                              onClick={() => { if (highlightedRowId) setHighlightedRowId(null) }}
+                              className={`align-top ${getStockRowClass(r)} ${highlightedRowId === r.id ? 'border-l-4 border-blue-600 bg-blue-100 shadow-lg transform scale-[1.01] transition-all duration-200 z-10' : ''} ${pulseHighlightId === r.id ? 'animate-pulse' : ''}`}
+                            >
                               <td className="border px-2 py-1">
                                 <button
                                   type="button"
@@ -792,13 +987,13 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                                   )}
                                 </button>
                               </td>
-                              <td className="border px-2 py-1 align-top font-medium">{r.codigo}</td>
-                              <td className="border px-2 py-1 align-top truncate max-w-[200px]">{r.nombre}</td>
-                              <td className="border px-2 py-1 align-top truncate max-w-[260px]">{r.descripcion}</td>
-                              <td className="border px-2 py-1 align-top">{r.codigoCompra}</td>
-                              <td className="border px-2 py-1 align-top">{r.proveedor}</td>
-                              <td className="border px-2 py-1 text-right align-top">{r.precio !== null && r.precio !== undefined ? `$${r.precio.toFixed(2)}` : '-'}</td>
-                              <td className="border px-2 py-1 text-right align-top">{r.stockActual}</td>
+                              <td className={`border px-2 py-1 align-top font-medium ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.codigo}</td>
+                              <td className={`border px-2 py-1 align-top truncate max-w-[200px] ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.nombre}</td>
+                              <td className={`border px-2 py-1 align-top truncate max-w-[260px] ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.descripcion}</td>
+                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.codigoCompra}</td>
+                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.proveedor}</td>
+                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{formatPrice(r.precio)}</td>
+                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.stockActual}</td>
                               <td className="border px-2 py-1 align-top">
                                 <div className="flex items-center justify-center gap-1">
                                   <Button
@@ -884,7 +1079,69 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                   </div>
                 )}
 
-                <div className="overflow-x-auto">
+                <div className="sm:hidden space-y-3">
+                  {getRepuestosByCategoria("Electrico").length === 0 ? (
+                    <div className="text-[11px] text-center text-muted-foreground">Aún no hay repuestos registrados en esta categoría.</div>
+                  ) : (
+                    getRepuestosByCategoria("Electrico").map((r) => (
+                      <div
+                        key={`card-electrico-${r.id}`}
+                        id={`repuesto-${r.id}-card`}
+                        className={`flex items-start gap-3 rounded-md border p-3 ${highlightedRowId === r.id ? 'border-blue-600 bg-blue-50 shadow-lg' : 'bg-card'}`}
+                      >
+                        <div className="w-12 flex-shrink-0">
+                          <button
+                            type="button"
+                            className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-md border bg-muted text-[11px] text-muted-foreground"
+                            onClick={() => openImagePreview(r.imagen_url)}
+                            disabled={!r.imagen_url}
+                          >
+                            {r.imagen_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={r.imagen_url} alt={r.codigo} className="h-full w-full object-cover" />
+                            ) : (
+                              <span className="text-xs">{(r.codigo || "?").slice(0, 2).toUpperCase()}</span>
+                            )}
+                          </button>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="truncate">
+                              <div className="text-sm font-medium">{r.codigo} • {r.nombre}</div>
+                              <div className="text-[11px] text-muted-foreground truncate">{r.descripcion}</div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-sm font-mono font-medium">{formatPrice(r.precio)}</div>
+                              <div className="text-[11px] text-muted-foreground">Stock: {r.stockActual}</div>
+                            </div>
+                          </div>
+
+                          <div className="mt-2 flex items-center gap-2">
+                            <Button type="button" variant="outline" size="sm" onClick={() => toggleDescripcion(r.id)}>
+                              <Eye className="h-3 w-3 mr-1" /> Ver
+                            </Button>
+                            {isAdmin && (
+                              <div className="ml-auto">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" size="sm"><MoreHorizontal className="h-3 w-3" /></Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="text-xs">
+                                    <DropdownMenuItem onClick={() => handleOpenUso(r)}>Uso</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleEdit(r)}>Editar</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleDelete(r.id)}>Borrar</DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="min-w-full border text-sm">
                     <thead className="bg-muted/50">
                       <tr>
@@ -909,7 +1166,11 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                       ) : (
                         getRepuestosByCategoria("Electrico").map((r) => (
                           <React.Fragment key={r.id}>
-                            <tr id={`repuesto-${r.id}`} className={`align-top ${getStockRowClass(r)}`}>
+                            <tr
+                              id={`repuesto-${r.id}`}
+                              onClick={() => { if (highlightedRowId) setHighlightedRowId(null) }}
+                              className={`align-top ${getStockRowClass(r)} ${highlightedRowId === r.id ? 'border-l-4 border-blue-600 bg-blue-100 shadow-lg transform scale-[1.01] transition-all duration-200 z-10' : ''} ${pulseHighlightId === r.id ? 'animate-pulse' : ''}`}
+                            >
                               <td className="border px-2 py-1">
                                 <button
                                   type="button"
@@ -928,13 +1189,13 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                                   )}
                                 </button>
                               </td>
-                              <td className="border px-2 py-1 align-top font-medium">{r.codigo}</td>
-                              <td className="border px-2 py-1 align-top truncate max-w-[200px]">{r.nombre}</td>
-                              <td className="border px-2 py-1 align-top truncate max-w-[260px]">{r.descripcion}</td>
-                              <td className="border px-2 py-1 align-top">{r.codigoCompra}</td>
-                              <td className="border px-2 py-1 align-top">{r.proveedor}</td>
-                              <td className="border px-2 py-1 text-right align-top">{r.precio !== null && r.precio !== undefined ? `$${r.precio.toFixed(2)}` : '-'}</td>
-                              <td className="border px-2 py-1 text-right align-top">{r.stockActual}</td>
+                              <td className={`border px-2 py-1 align-top font-medium ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.codigo}</td>
+                              <td className={`border px-2 py-1 align-top truncate max-w-[200px] ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.nombre}</td>
+                              <td className={`border px-2 py-1 align-top truncate max-w-[260px] ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.descripcion}</td>
+                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.codigoCompra}</td>
+                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.proveedor}</td>
+                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{formatPrice(r.precio)}</td>
+                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.stockActual}</td>
                               <td className="border px-2 py-1 align-top">
                                 <div className="flex items-center justify-center gap-1">
                                   <Button
@@ -1020,7 +1281,69 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                   </div>
                 )}
 
-                <div className="overflow-x-auto">
+                <div className="sm:hidden space-y-3">
+                  {getRepuestosByCategoria("Neumatico").length === 0 ? (
+                    <div className="text-[11px] text-center text-muted-foreground">Aún no hay repuestos registrados en esta categoría.</div>
+                  ) : (
+                    getRepuestosByCategoria("Neumatico").map((r) => (
+                      <div
+                        key={`card-neumatico-${r.id}`}
+                        id={`repuesto-${r.id}-card`}
+                        className={`flex items-start gap-3 rounded-md border p-3 ${highlightedRowId === r.id ? 'border-blue-600 bg-blue-50 shadow-lg' : 'bg-card'}`}
+                      >
+                        <div className="w-12 flex-shrink-0">
+                          <button
+                            type="button"
+                            className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-md border bg-muted text-[11px] text-muted-foreground"
+                            onClick={() => openImagePreview(r.imagen_url)}
+                            disabled={!r.imagen_url}
+                          >
+                            {r.imagen_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={r.imagen_url} alt={r.codigo} className="h-full w-full object-cover" />
+                            ) : (
+                              <span className="text-xs">{(r.codigo || "?").slice(0, 2).toUpperCase()}</span>
+                            )}
+                          </button>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="truncate">
+                              <div className="text-sm font-medium">{r.codigo} • {r.nombre}</div>
+                              <div className="text-[11px] text-muted-foreground truncate">{r.descripcion}</div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-sm font-mono font-medium">{formatPrice(r.precio)}</div>
+                              <div className="text-[11px] text-muted-foreground">Stock: {r.stockActual}</div>
+                            </div>
+                          </div>
+
+                          <div className="mt-2 flex items-center gap-2">
+                            <Button type="button" variant="outline" size="sm" onClick={() => toggleDescripcion(r.id)}>
+                              <Eye className="h-3 w-3 mr-1" /> Ver
+                            </Button>
+                            {isAdmin && (
+                              <div className="ml-auto">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" size="sm"><MoreHorizontal className="h-3 w-3" /></Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="text-xs">
+                                    <DropdownMenuItem onClick={() => handleOpenUso(r)}>Uso</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleEdit(r)}>Editar</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleDelete(r.id)}>Borrar</DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="min-w-full border text-sm">
                     <thead className="bg-muted/50">
                       <tr>
@@ -1045,7 +1368,11 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                       ) : (
                         getRepuestosByCategoria("Neumatico").map((r) => (
                           <React.Fragment key={r.id}>
-                            <tr className={`align-top ${getStockRowClass(r)}`}>
+                            <tr
+                              id={`repuesto-${r.id}`}
+                              onClick={() => { if (highlightedRowId) setHighlightedRowId(null) }}
+                              className={`align-top ${getStockRowClass(r)} ${highlightedRowId === r.id ? '!border-l-4 !border-blue-600 !bg-blue-100 shadow-lg transform scale-[1.01] transition-all duration-200 z-10' : ''} ${pulseHighlightId === r.id ? 'animate-pulse' : ''}`}
+                            >
                               <td className="border px-2 py-1">
                                 <button
                                   type="button"
@@ -1064,13 +1391,13 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                                   )}
                                 </button>
                               </td>
-                              <td className="border px-2 py-1 align-top font-medium">{r.codigo}</td>
-                              <td className="border px-2 py-1 align-top truncate max-w-[200px]">{r.nombre}</td>
-                              <td className="border px-2 py-1 align-top truncate max-w-[260px]">{r.descripcion}</td>
-                              <td className="border px-2 py-1 align-top">{r.codigoCompra}</td>
-                              <td className="border px-2 py-1 align-top">{r.proveedor}</td>
-                              <td className="border px-2 py-1 text-right align-top">{r.precio !== null && r.precio !== undefined ? `$${r.precio.toFixed(2)}` : '-'}</td>
-                              <td className="border px-2 py-1 text-right align-top">{r.stockActual}</td>
+                              <td className={`border px-2 py-1 align-top font-medium ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.codigo}</td>
+                              <td className={`border px-2 py-1 align-top truncate max-w-[200px] ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.nombre}</td>
+                              <td className={`border px-2 py-1 align-top truncate max-w-[260px] ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.descripcion}</td>
+                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.codigoCompra}</td>
+                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.proveedor}</td>
+                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{formatPrice(r.precio)}</td>
+                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.stockActual}</td>
                               <td className="border px-2 py-1 align-top">
                                 <div className="flex items-center justify-center gap-1">
                                   <Button
@@ -1138,7 +1465,69 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
 
             {expandedCategoria === "Otro" && (
               <div className="px-4 pb-3 text-sm text-muted-foreground space-y-3">
-                <div className="overflow-x-auto">
+                <div className="sm:hidden space-y-3">
+                  {getRepuestosByCategoria("Otro").length === 0 ? (
+                    <div className="text-[11px] text-center text-muted-foreground">Aún no hay repuestos registrados en esta categoría.</div>
+                  ) : (
+                    getRepuestosByCategoria("Otro").map((r) => (
+                      <div
+                        key={`card-otro-${r.id}`}
+                        id={`repuesto-${r.id}-card`}
+                        className={`flex items-start gap-3 rounded-md border p-3 ${highlightedRowId === r.id ? 'border-blue-600 bg-blue-50 shadow-lg' : 'bg-card'}`}
+                      >
+                        <div className="w-12 flex-shrink-0">
+                          <button
+                            type="button"
+                            className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-md border bg-muted text-[11px] text-muted-foreground"
+                            onClick={() => openImagePreview(r.imagen_url)}
+                            disabled={!r.imagen_url}
+                          >
+                            {r.imagen_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={r.imagen_url} alt={r.codigo} className="h-full w-full object-cover" />
+                            ) : (
+                              <span className="text-xs">{(r.codigo || "?").slice(0, 2).toUpperCase()}</span>
+                            )}
+                          </button>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="truncate">
+                              <div className="text-sm font-medium">{r.codigo} • {r.nombre}</div>
+                              <div className="text-[11px] text-muted-foreground truncate">{r.descripcion}</div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-sm font-mono font-medium">{formatPrice(r.precio)}</div>
+                              <div className="text-[11px] text-muted-foreground">Stock: {r.stockActual}</div>
+                            </div>
+                          </div>
+
+                          <div className="mt-2 flex items-center gap-2">
+                            <Button type="button" variant="outline" size="sm" onClick={() => toggleDescripcion(r.id)}>
+                              <Eye className="h-3 w-3 mr-1" /> Ver
+                            </Button>
+                            {isAdmin && (
+                              <div className="ml-auto">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" size="sm"><MoreHorizontal className="h-3 w-3" /></Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="text-xs">
+                                    <DropdownMenuItem onClick={() => handleOpenUso(r)}>Uso</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleEdit(r)}>Editar</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleDelete(r.id)}>Borrar</DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="min-w-full border text-sm">
                     <thead className="bg-muted/50">
                       <tr>
@@ -1163,7 +1552,11 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                       ) : (
                         getRepuestosByCategoria("Otro").map((r) => (
                           <React.Fragment key={r.id}>
-                            <tr className={`align-top ${getStockRowClass(r)}`}>
+                            <tr
+                              id={`repuesto-${r.id}`}
+                              onClick={() => { if (highlightedRowId) setHighlightedRowId(null) }}
+                              className={`align-top ${getStockRowClass(r)} ${highlightedRowId === r.id ? 'border-l-4 border-blue-600 bg-blue-100 shadow-lg transform scale-[1.01] transition-all duration-200 z-10' : ''} ${pulseHighlightId === r.id ? 'animate-pulse' : ''}`}
+                            >
                               <td className="border px-2 py-1">
                                 <button
                                   type="button"
@@ -1182,13 +1575,13 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                                   )}
                                 </button>
                               </td>
-                              <td className="border px-2 py-1 align-top font-medium">{r.codigo}</td>
-                              <td className="border px-2 py-1 align-top truncate max-w-[200px]">{r.nombre}</td>
-                              <td className="border px-2 py-1 align-top truncate max-w-[260px]">{r.descripcion}</td>
-                              <td className="border px-2 py-1 align-top">{r.codigoCompra}</td>
-                              <td className="border px-2 py-1 align-top">{r.proveedor}</td>
-                              <td className="border px-2 py-1 text-right align-top">{r.precio !== null && r.precio !== undefined ? `$${r.precio.toFixed(2)}` : '-'}</td>
-                              <td className="border px-2 py-1 text-right align-top">{r.stockActual}</td>
+                              <td className={`border px-2 py-1 align-top font-medium ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{r.codigo}</td>
+                              <td className={`border px-2 py-1 align-top truncate max-w-[200px] ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{r.nombre}</td>
+                              <td className={`border px-2 py-1 align-top truncate max-w-[260px] ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{r.descripcion}</td>
+                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{r.codigoCompra}</td>
+                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{r.proveedor}</td>
+                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{formatPrice(r.precio)}</td>
+                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{r.stockActual}</td>
                               <td className="border px-2 py-1 align-top">
                                 <div className="flex items-center justify-center gap-1">
                                   <Button
@@ -1342,51 +1735,79 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
 
             <div className="relative">
               <label className="text-xs font-medium">Máquina que requiere</label>
-              <Input
-                value={usoMaquina}
-                onChange={(e) => {
-                  setUsoMaquina(e.target.value)
-                  setUsoMaquinaSeleccionada(null)
-                }}
-
-                onFocus={() => setUsoMaquinaFocused(true)}
-                onBlur={() => {
-                  // pequeño delay para permitir click en la sugerencia
-                  setTimeout(() => setUsoMaquinaFocused(false), 150)
-                }}
-                className="mt-1 h-9 text-xs"
-                placeholder="Ej: CODIGO - Área - Línea - Equipo"
-              />
-
-              {usoMaquinaFocused && usoMaquina.trim() !== "" && maquinaSuggestions.length > 0 && (
-                <div className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-background text-[11px] shadow">
-                  {maquinaSuggestions.map((eq: any) => {
-                    const areaPart = eq.area ? ` - ${eq.area}` : ""
-                    const lineaPart = eq.linea ? ` - ${eq.linea}` : ""
-                    const label = `${eq.codigo}${areaPart}${lineaPart} - ${eq.nombre || ""}`
-
-                    return (
-                      <button
-                        key={eq.id}
-                        type="button"
-                        className="flex w-full cursor-pointer items-start gap-1 px-2 py-1 text-left hover:bg-muted"
-                        onMouseDown={(ev) => {
-                          ev.preventDefault()
-                          setUsoMaquina(label)
-                          setUsoMaquinaSeleccionada(eq)
-                          setUsoMaquinaFocused(false)
-                        }}
-                      >
-                        <span className="font-semibold">{eq.codigo}</span>
-                        <span className="text-muted-foreground truncate">
-                          {areaPart.replace(" - ", "")}
-                          {lineaPart}
-                          {eq.nombre ? ` - ${eq.nombre}` : ""}
-                        </span>
-                      </button>
-                    )
-                  })}
+              {usoMaquinaSeleccionada ? (
+                <div className="mt-1 flex items-center justify-between rounded-md border bg-muted/40 p-2">
+                  <span className="text-xs font-medium">{usoMaquina}</span>
+                  <div className="flex items-center">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto px-2 py-1 text-xs"
+                      onClick={() => setMachineDetailCode(usoMaquinaSeleccionada.codigo)}
+                    >
+                      Ver ficha
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto px-1 py-1 text-xs text-destructive hover:bg-destructive/10"
+                      onClick={() => {
+                        setUsoMaquina('');
+                        setUsoMaquinaSeleccionada(null);
+                      }}
+                    >
+                      X
+                    </Button>
+                  </div>
                 </div>
+              ) : (
+                <>
+                  <Input
+                    value={usoMaquina}
+                    onChange={(e) => {
+                      setUsoMaquina(e.target.value)
+                      setUsoMaquinaSeleccionada(null)
+                    }}
+                    onFocus={() => setUsoMaquinaFocused(true)}
+                    onBlur={() => {
+                      setTimeout(() => setUsoMaquinaFocused(false), 150)
+                    }}
+                    className="mt-1 h-9 text-xs"
+                    placeholder="Ej: CODIGO - Área - Línea - Equipo"
+                  />
+                  {usoMaquinaFocused && usoMaquina.trim() !== "" && maquinaSuggestions.length > 0 && (
+                    <div className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-background text-[11px] shadow">
+                      {maquinaSuggestions.map((eq: any) => {
+                        const areaPart = eq.area ? ` - ${eq.area}` : ""
+                        const lineaPart = eq.linea ? ` - ${eq.linea}` : ""
+                        const label = `${eq.codigo}${areaPart}${lineaPart} - ${eq.nombre || ""}`
+
+                        return (
+                          <button
+                            key={eq.id}
+                            type="button"
+                            className="flex w-full cursor-pointer items-start gap-1 px-2 py-1 text-left hover:bg-muted"
+                            onMouseDown={(ev) => {
+                              ev.preventDefault()
+                              setUsoMaquina(label)
+                              setUsoMaquinaSeleccionada(eq)
+                              setUsoMaquinaFocused(false)
+                            }}
+                          >
+                            <span className="font-semibold">{eq.codigo}</span>
+                            <span className="text-muted-foreground truncate">
+                              {areaPart.replace(" - ", "")}
+                              {lineaPart}
+                              {eq.nombre ? ` - ${eq.nombre}` : ""}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
               )}
 
               <p className="mt-1 text-[11px] text-muted-foreground">
@@ -1416,6 +1837,14 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <EquipmentDetailModal
+        equipment={machineForDetail as any}
+        isOpen={!!machineDetailCode}
+        onClose={() => setMachineDetailCode(null)}
+        isLoading={!!machineDetailCode && equiposLoading}
+        showHojaDeVidaButton={true}
+      />
 
 
 

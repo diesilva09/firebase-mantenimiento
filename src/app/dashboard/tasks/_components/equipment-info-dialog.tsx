@@ -18,34 +18,14 @@ export function EquipmentInfoDialog({ isOpen, setIsOpen, task }: EquipmentInfoDi
     ? equipos.find((e) => e.codigo === task.code)
     : null
 
-  if (loading) {
-    return (
-      <EquipmentDetailModal
-        equipment={null}
-        isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
-        title="Cargando información del equipo..."
-      />
-    )
-  }
-
-  if (!equipment && task) {
-    return (
-      <EquipmentDetailModal
-        equipment={null}
-        isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
-        title={`Equipo ${task.code} - No encontrado`}
-      />
-    )
-  }
-
   return (
     <EquipmentDetailModal
       equipment={equipment as any}
       isOpen={isOpen}
       onClose={() => setIsOpen(false)}
-      title={equipment ? `Equipo: ${equipment.nombre}` : task ? `Equipo ${task.code}` : "Equipo"}
+      title={equipment ? `Equipo: ${equipment.nombre}` : (task ? `Equipo ${task.code}` : "Equipo")}
+      showHojaDeVidaButton={true}
+      isLoading={loading && isOpen}
     />
   )
 }

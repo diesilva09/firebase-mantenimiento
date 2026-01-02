@@ -18,6 +18,7 @@ interface NotificationsContextValue {
   requestPermission: () => Promise<NotificationPermissionState>;
   hideNotification: (id: string) => void;
   hideAllNotifications: () => void;
+  refreshNotifications: () => Promise<void>;
 }
 
 const NotificationsContext = createContext<NotificationsContextValue | undefined>(undefined);
@@ -32,21 +33,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [readIds, setReadIds] = useState<string[]>([]);
 
-  // Leer permiso inicial (solo en cliente) y memo sencillo en localStorage para no molestar siempre
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    if (!("Notification" in window)) {
-      setPermission("unsupported");
-      return;
-    }
-
-    // Siempre usamos el estado real del navegador
-    setPermission(window.Notification.permission);
-  }, []);
-
-    useEffect(() => {
-    const loadNotifications = async () => {
+  const loadNotifications = async () => {
       try {
         const res = await fetch('/api/notificaciones', { cache: 'no-store' })
         if (!res.ok) return
@@ -67,7 +54,19 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         console.error('Error cargando notificaciones desde BD', e)
       }
     }
+  useEffect(() => {
+    if (typeof window === "undefined") return;
 
+    if (!("Notification" in window)) {
+      setPermission("unsupported");
+      return;
+    }
+
+    // Siempre usamos el estado real del navegador
+    setPermission(window.Notification.permission);
+  }, []);
+
+  useEffect(() => {
     loadNotifications()
   }, [])
 
@@ -223,6 +222,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     requestPermission,
     hideNotification,
     hideAllNotifications,
+    refreshNotifications: loadNotifications,
   };
 
   return (

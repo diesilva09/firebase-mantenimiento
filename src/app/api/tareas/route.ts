@@ -50,7 +50,55 @@ export async function POST(req: Request) {
       ]
     )
 
-    return NextResponse.json(rows[0], { status: 201 })
+    const nuevaTarea = rows[0]
+
+    // Crear notificación
+    try {
+      const url = new URL(req.url)
+      const baseUrl = `${url.protocol}//${url.host}`
+
+      // Consultar información adicional del equipo para la notificación
+      let nombreEquipo = 'Sin nombre';
+      let lineaEquipo = 'Sin línea';
+      
+      if (nuevaTarea.codigo_equipo) {
+        const equipoRes = await query('SELECT nombre, linea FROM equipos WHERE codigo = $1', [nuevaTarea.codigo_equipo]);
+        if (equipoRes.rows.length > 0) {
+          nombreEquipo = equipoRes.rows[0].nombre || 'Sin nombre';
+          lineaEquipo = equipoRes.rows[0].linea || 'Sin línea';
+        }
+      }
+
+      const code = nuevaTarea.codigo_equipo || nuevaTarea.codigo_zona || 'Sin código';
+      const area = nuevaTarea.area || 'Sin área';
+      const fecha = new Date(nuevaTarea.fecha_programada).toLocaleString('es-CO', { timeZone: 'America/Bogota' });
+
+      // Formato de notificación mejorado con etiquetas y saltos de línea
+      const message = `Responsable: ${nuevaTarea.responsable}\nPrioridad: ${nuevaTarea.prioridad}\nFecha: ${fecha}\nDescripción: ${nuevaTarea.descripcion}`;
+
+      await fetch(`${baseUrl}/api/notificaciones`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          titulo: `Nueva Tarea: ${code} - ${area}`,
+          mensaje: message,
+          tipo: 'task_alert',
+          severidad: nuevaTarea.prioridad === 'Alta'
+            ? 'critical' // Rojo
+            : nuevaTarea.prioridad === 'Media'
+              ? 'warning' // Naranja
+              : 'info', // Baja -> se mapea a Verde en frontend
+          ref_task_id: nuevaTarea.id,
+          estado_tarea: 'Pendiente'
+        })
+      })
+    } catch (notificationError) {
+      console.error('Error creando la notificación:', notificationError)
+      // Opcional: podrías querer manejar este error de alguna forma,
+      // pero por ahora solo lo logueamos para no afectar la respuesta principal.
+    }
+
+    return NextResponse.json(nuevaTarea, { status: 201 })
   } catch (err) {
     console.error('Error insertando tarea:', err)
     return NextResponse.json({ error: 'Error guardando tarea' }, { status: 500 })

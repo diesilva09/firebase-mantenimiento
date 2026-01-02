@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Equipo {
+  id                   Int                  @id @default(autoincrement())
+  codigo               String               @unique
+  version              String?
+  nombre               String
+  area                 String?
+  linea                String?
+  marca                String?
+  modelo               String?
+  fabricante           String?
+  fecha_implementacion DateTime?            @db.Date
+  fecha_adquisicion    DateTime?            @db.Date
+  capacidad            String?
+  amperaje             String?
+  potencia             String?
+  voltaje              String?
+  rpm                  String?
+  magnitud_medida      String?
+  estado               String?              @default("Operativo")
+  imagen_url           String?
+  attachments_url      String?
+  creado_en            DateTime             @default(now()) @db.Timestamp(6)
+  actualizado_en       DateTime?            @updatedAt
+
+  ordenesDeMantenimiento OrdenMantenimiento[]
+  historial            EquiposHistorial[]
+}
+
+model Zona {
+  id         Int      @id @default(autoincrement())
+  tipo       String
+  area       String?
+  codigo     String?  @unique
+  nombre     String
+  created_at DateTime @default(now()) @db.Timestamp(6)
+}
+
+model OrdenMantenimiento {
+  id                   Int       @id @default(autoincrement())
+  codigo_equipo        String
+  tipo_mantenimiento   String
+  fecha_solicitud      DateTime  @db.Date
+  responsable          String?
+  descripcion_falla    String
+  repuestos_utilizados String?
+  prioridad            String
+  estado               String    @default("abierta")
+  hora_inicio          String?   // Se mantiene como String si se guarda como 'HH:mm'
+  hora_fin             String?   // Se mantiene como String si se guarda como 'HH:mm'
+  observaciones        String?
+  creado_en            DateTime  @default(now()) @db.Timestamp(6)
+
+  equipo               Equipo    @relation(fields: [codigo_equipo], references: [codigo], onDelete: Cascade)
+  tareas               Tarea[]
+}
+
+model EquiposHistorial {
+  id                 Int       @id @default(autoincrement())
+  codigo_equipo      String
+  tarea_id           Int?
+  fecha_evento       DateTime  @db.Timestamp(6)
+  labor              String
+  tipo_mantenimiento String?
+  repuestos_usados   String?
+  observaciones      String?
+  ejecutado_por      String?
+  creado_por         String?
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+
+  equipo             Equipo    @relation(fields: [codigo_equipo], references: [codigo], onDelete: Cascade)
+  tarea              Tarea?    @relation(fields: [tarea_id], references: [id], onDelete: SetNull)
+}
+
+model Tarea {
+  id                   Int       @id @default(autoincrement())
+  orden_mantenimiento_id Int
+  titulo               String
+  descripcion          String?
+  estado               String    @default("pendiente")
+  fecha_inicio         DateTime? @db.Timestamp(6)
+  fecha_fin            DateTime? @db.Timestamp(6)
+  responsable          String?
+  prioridad            String?   @default("media")
+  creado_en            DateTime  @default(now()) @db.Timestamp(6)
+  actualizado_en       DateTime? @updatedAt
+
+  ordenMantenimiento   OrdenMantenimiento @relation(fields: [orden_mantenimiento_id], references: [id], onDelete: Cascade)
+  historial            EquiposHistorial[]
+}

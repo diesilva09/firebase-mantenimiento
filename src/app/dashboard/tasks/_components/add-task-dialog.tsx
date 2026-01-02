@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Form,
   FormControl,
@@ -39,7 +40,8 @@ import { Calendar } from "@/components/ui/calendar"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import type { Task, User, Schedule, Priority, Notification } from "@/lib/types"
-import { useNotifications } from "@/hooks/use-notifications"
+import { useNotificationsContext as useNotifications } from "@/context/notifications-context"
+import { scheduleTaskReminders } from "../../../../services/task-reminders"
 import { useToast } from "@/hooks/use-toast"
 
 const taskSchema = z
@@ -55,6 +57,9 @@ const taskSchema = z
       required_error: "La fecha de ejecución es requerida.",
     }),
     hasAlert: z.boolean().default(false),
+    reminderType: z.enum(['predefined', 'custom']).optional(),
+    predefinedReminders: z.array(z.boolean()).optional(),
+    customReminderDate: z.date().optional(),
   })
   .refine(
     (data) => (data.assignedTo === 'otro' ? Boolean(data.customAssignedTo?.trim()) : true),
@@ -63,13 +68,26 @@ const taskSchema = z
       message: 'Ingresa el nombre del responsable.',
     }
   )
+  .refine(
+    (data) => {
+      // Si hasAlert es true y reminderType es 'custom', customReminderDate debe estar definido
+      if (data.hasAlert && data.reminderType === 'custom') {
+        return data.customReminderDate instanceof Date && !isNaN(data.customReminderDate.getTime());
+      }
+      return true;
+    },
+    {
+      path: ['customReminderDate'],
+      message: 'La fecha del recordatorio personalizado es requerida.',
+    }
+  )
 
 type TaskFormValues = z.infer<typeof taskSchema>
 
 interface AddTaskDialogProps {
   isOpen: boolean
   setIsOpen: (isOpen: boolean) => void
-  onAddTask: (task: Omit<Task, 'id' | 'status'>) => void
+  onAddTask: (task: Task) => void
   users: User[]
 }
 
@@ -87,6 +105,9 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
       assignedTo: "",
       customAssignedTo: "",
       hasAlert: false,
+      reminderType: undefined,
+      predefinedReminders: [true, true, true], // Por defecto, todos los recordatorios predefinidos están activados
+      customReminderDate: undefined,
     },
   })
 
@@ -212,17 +233,12 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
 
  async function onSubmit(data: TaskFormValues) {
   try {
-    // Extraer código y área si vienen del autocomplete
     const rawCode = data.code?.trim() || "";
     const area = data.area;
 
-    // Verificar si el código corresponde a un equipo existente
     const matchedEquipo = equipos.find((e) => e.codigo === rawCode);
-
-    // Verificar si el código corresponde a una zona conocida
     const matchedZona = zonas.find((z) => (z.codigo || z.nombre) === rawCode);
 
-    // Validar cronograma según el tipo de zona
     if (matchedZona) {
       if (matchedZona.tipo === "PARTES_ALTAS" && data.schedule !== "Partes Altas") {
         toast({
@@ -242,13 +258,19 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
       }
     }
 
-    // Si es un equipo conocido, usamos su código; si no, mandamos null para no romper la FK
     const codigoEquipoForDB = matchedEquipo ? matchedEquipo.codigo : null;
-
-    // Si no es equipo pero sí es una zona conocida, guardamos el código de la zona aparte
     const codigoZonaForDB = !matchedEquipo && matchedZona ? (matchedZona.codigo || matchedZona.nombre) : null;
 
-    // Preparar datos para la base de datos
+    // Obtener el nombre completo del responsable para la notificación
+    const responsableId = data.assignedTo;
+    let responsableName = '';
+    if (responsableId === 'otro') {
+        responsableName = data.customAssignedTo?.trim() || '';
+    } else {
+        const user = users.find(u => u.id === responsableId);
+        responsableName = user ? user.name : responsableId;
+    }
+
     const tareaData = {
       codigo_equipo: codigoEquipoForDB,
       codigo_zona: codigoZonaForDB,
@@ -259,13 +281,12 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
       cronograma: data.schedule,
       prioridad: data.priority,
       fecha_programada: data.nextExecution.toISOString(),
-      responsable: data.assignedTo === 'otro' ? data.customAssignedTo : data.assignedTo,
+      responsable: responsableName,
       tiene_alerta: data.hasAlert
     };
 
     console.log('Enviando tarea a la BD:', tareaData);
 
-    // Guardar en la base de datos
     const response = await fetch('/api/tareas', {
       method: 'POST',
       headers: {
@@ -276,97 +297,35 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
 
     if (!response.ok) {
       const errorData = await response.json();
-    
       throw new Error(errorData.error || 'Error al guardar en la BD');
     }
 
-    const nuevaTarea = await response.json();
+    const dbTask = await response.json();
 
-    // Crear notificación interna para la nueva tarea
-    try {
-      const baseNotif: Omit<Notification, "id" | "createdAt"> = {
-        title: `Nueva tarea en ${data.area || 'Área sin nombre'}`,
-        message: `Equipo: ${data.code || 'Sin código'}\nDescripción: ${data.description}`,
-        type: "task_alert",
-        severity:
-          data.priority === "Alta"
-            ? "critical"
-            : data.priority === "Media"
-            ? "warning"
-            : "info",
-        read: false,
-        refId: nuevaTarea.id ?? undefined,
-        status: data.nextExecution > new Date() ? "Futura" : "Pendiente",
-      }
-
-      // Guardar notificación en la BD y usar el id real devuelto
-      let finalNotif: Notification | null = null
-      try {
-        const resNotif = await fetch('/api/notificaciones', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            titulo: baseNotif.title,
-            mensaje: baseNotif.message,
-            tipo: baseNotif.type,
-            severidad: baseNotif.severity,
-            estado_tarea: baseNotif.status,
-            prioridad: data.priority,
-            ref_task_id: nuevaTarea.id ?? null,
-          }),
-        })
-
-        if (resNotif.ok) {
-          const jsonNotif = await resNotif.json()
-          const saved = jsonNotif.data
-          finalNotif = {
-            id: String(saved.id),
-            title: baseNotif.title,
-            message: baseNotif.message,
-            type: baseNotif.type,
-            severity: baseNotif.severity,
-            createdAt: new Date(saved.creado_en).toISOString(),
-            read: false,
-            refId: String(saved.ref_task_id ?? baseNotif.refId ?? ""),
-            status: baseNotif.status,
+    if (data.hasAlert) {
+        const taskForReminder: Task = {
+            id: String(dbTask.id),
+            description: data.description,
+            area: data.area,
+            code: data.code,
+            schedule: data.schedule,
+            priority: data.priority,
+            assignedTo: users.find(u => u.id === data.assignedTo) || { id: 'unknown', name: 'Unknown', avatarUrl: '' },
+            nextExecution: data.nextExecution.toISOString(),
+            hasAlert: data.hasAlert,
+            status: 'Pendiente'
+        };
+        await scheduleTaskReminders(
+          taskForReminder,
+          data.nextExecution,
+          {
+            reminderType: data.reminderType,
+            predefinedReminders: data.predefinedReminders,
+            customReminderDate: data.customReminderDate
           }
-        }
-      } catch (e) {
-        console.warn('No se pudo guardar la notificación en BD', e)
+        );
       }
 
-      // Fallback en caso de que falle la BD
-      const notif: Notification =
-        finalNotif ?? {
-          id: `task-created-${nuevaTarea.id ?? Date.now()}`,
-          title: baseNotif.title,
-          message: baseNotif.message,
-          type: baseNotif.type,
-          severity: baseNotif.severity,
-          createdAt: new Date().toISOString(),
-          read: false,
-          refId: baseNotif.refId,
-          status: baseNotif.status,
-        }
-
-      // Actualizar contexto en memoria
-      addNotification(notif)
-
-      // Notificación del navegador (si el usuario la permitió)
-      if (
-        permission === "granted" &&
-        typeof window !== "undefined" &&
-        "Notification" in window
-      ) {
-        new Notification(notif.title, {
-          body: notif.message,
-        })
-      }
-    } catch (e) {
-      console.warn("No se pudo crear la notificación de nueva tarea", e)
-    }
-
-    // Preparar un usuario asignado para el frontend (si no se encuentra en "users", usar fallback)
     let assignedToUser = users.find(u => u.id === data.assignedTo)
     if (data.assignedTo === 'otro' && data.customAssignedTo) {
       const name = data.customAssignedTo.trim()
@@ -383,7 +342,8 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
       avatarUrl: '',
     }
 
-    onAddTask({
+    const newTaskForParent: Task = {
+      id: String(dbTask.id),
       code: data.code ?? '',
       area: data.area ?? '',
       description: data.description ?? '',
@@ -392,7 +352,10 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
       assignedTo: finalAssignedTo,
       nextExecution: data.nextExecution.toISOString(),
       hasAlert: data.hasAlert,
-    })
+      status: 'Pendiente',
+    }
+
+    onAddTask(newTaskForParent)
 
     setIsOpen(false)
     form.reset()
@@ -401,13 +364,19 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
 
   } catch (error) {
     console.error('Error guardando tarea:', error);
-    // Puedes agregar un toast de error aquí si quieres
+    toast({
+      title: "Error al crear la tarea",
+      description: error instanceof Error ? error.message : "Ocurrió un error al crear la tarea",
+      variant: "destructive",
+    });
   }
 }
 
+
+
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="w-full max-w-lg sm:max-w-xl md:max-w-2xl max-h-[90vh] overflow-y-auto">
+      <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <DialogContent className="w-[95vw] max-w-lg sm:max-w-xl md:max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>Agregar Nueva Labor</DialogTitle>
           <DialogDescription>
@@ -728,7 +697,7 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                             )}
                           >
                             {field.value ? (
-                              format(field.value, "PPP", { locale: es })
+                              format(field.value, "PPP HH:mm", { locale: es })
                             ) : (
                               <span>Seleccione una fecha</span>
                             )}
@@ -740,10 +709,35 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                         <Calendar
                           mode="single"
                           selected={field.value}
-                          onSelect={field.onChange}
+                          onSelect={(date) => {
+                            if (!date) return
+                            const newDate = new Date(date)
+                            if (field.value) {
+                              newDate.setHours(field.value.getHours(), field.value.getMinutes())
+                            }
+                            field.onChange(newDate)
+                          }}
                           disabled={(date) => date < new Date("1900-01-01")}
                           initialFocus
                         />
+                        <div className="p-3 border-t border-border">
+                          <div className="flex items-center space-x-2">
+                            <span>Hora:</span>
+                            <Input
+                              type="time"
+                              value={field.value ? format(field.value, "HH:mm") : "00:00"}
+                              onChange={(e) => {
+                                if (field.value) {
+                                  const [hours, minutes] = e.target.value.split(':').map(Number);
+                                  const newDate = new Date(field.value);
+                                  newDate.setHours(hours, minutes);
+                                  field.onChange(newDate);
+                                }
+                              }}
+                              className="w-24"
+                            />
+                          </div>
+                        </div>
                       </PopoverContent>
                     </Popover>
                     <FormMessage />
@@ -768,6 +762,178 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                 </FormItem>
               )}
             />
+
+            {/* Opciones de configuración del recordatorio - visible solo cuando hasAlert es true */}
+            {form.watch("hasAlert") && (
+              <div className="space-y-4 p-4 border rounded-lg bg-muted/20">
+                <h4 className="font-medium">Configuración de Recordatorio</h4>
+
+                {/* Opciones predefinidas */}
+                <FormField
+                  control={form.control}
+                  name="reminderType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tipo de Recordatorio</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Seleccione un tipo de recordatorio" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="predefined">Predefinido (1 día, 3 días, 1 semana antes)</SelectItem>
+                          <SelectItem value="custom">Personalizado</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {/* Opciones predefinidas */}
+                {form.watch("reminderType") === "predefined" && (
+                  <FormField
+                    control={form.control}
+                    name="predefinedReminders"
+                    render={() => (
+                      <FormItem>
+                        <FormLabel>Recordatorios Predefinidos</FormLabel>
+                        <div className="flex flex-col space-y-2">
+                          <FormField
+                            control={form.control}
+                            name="predefinedReminders.0"
+                            render={({ field }) => (
+                              <FormItem className="flex flex-row items-start space-x-3 space-y-0">
+                                <FormControl>
+                                  <Checkbox
+                                    checked={field.value}
+                                    onCheckedChange={field.onChange}
+                                  />
+                                </FormControl>
+                                <div className="space-y-1 leading-none">
+                                  <FormLabel>1 semana antes</FormLabel>
+                                </div>
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="predefinedReminders.1"
+                            render={({ field }) => (
+                              <FormItem className="flex flex-row items-start space-x-3 space-y-0">
+                                <FormControl>
+                                  <Checkbox
+                                    checked={field.value}
+                                    onCheckedChange={field.onChange}
+                                  />
+                                </FormControl>
+                                <div className="space-y-1 leading-none">
+                                  <FormLabel>3 días antes</FormLabel>
+                                </div>
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="predefinedReminders.2"
+                            render={({ field }) => (
+                              <FormItem className="flex flex-row items-start space-x-3 space-y-0">
+                                <FormControl>
+                                  <Checkbox
+                                    checked={field.value}
+                                    onCheckedChange={field.onChange}
+                                  />
+                                </FormControl>
+                                <div className="space-y-1 leading-none">
+                                  <FormLabel>1 día antes</FormLabel>
+                                </div>
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+
+                {/* Opción personalizada */}
+                {form.watch("reminderType") === "custom" && (
+                  <FormField
+                    control={form.control}
+                    name="customReminderDate"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-col">
+                        <FormLabel>Fecha y Hora del Recordatorio</FormLabel>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <FormControl>
+                              <Button
+                                variant={"outline"}
+                                className={cn(
+                                  "pl-3 text-left font-normal",
+                                  !field.value && "text-muted-foreground"
+                                )}
+                              >
+                                {field.value ? (
+                                  <>
+                                    {format(field.value, "PPP", { locale: es })} - {format(field.value, "HH:mm")}
+                                  </>
+                                ) : (
+                                  <span>Seleccione fecha y hora</span>
+                                )}
+                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                              </Button>
+                            </FormControl>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={field.value}
+                              onSelect={(date) => {
+                                if (!date) return
+                                const newDate = new Date(date)
+                                if (field.value) {
+                                  newDate.setHours(field.value.getHours(), field.value.getMinutes())
+                                }
+                                field.onChange(newDate)
+                              }}
+                              disabled={(date) =>
+                                date.getTime() < new Date().setHours(0, 0, 0, 0) || date > new Date(new Date().setMonth(new Date().getMonth() + 6))
+                              }
+                              initialFocus
+                            />
+                            <div className="p-3 border-t border-border">
+                              <div className="flex items-center space-x-2">
+                                <span>Hora:</span>
+                                <Input
+                                  type="time"
+                                  value={field.value ? format(field.value, "HH:mm") : "09:00"}
+                                  onChange={(e) => {
+                                    if (field.value) {
+                                      const [hours, minutes] = e.target.value.split(':').map(Number);
+                                      const newDate = new Date(field.value);
+                                      newDate.setHours(hours, minutes);
+                                      field.onChange(newDate);
+                                    }
+                                  }}
+                                  className="w-24"
+                                />
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+              </div>
+            )}
             <DialogFooter className="pt-4">
               <Button type="button" variant="ghost" onClick={() => setIsOpen(false)}>Cancelar</Button>
               <Button type="submit">Guardar Tarea</Button>

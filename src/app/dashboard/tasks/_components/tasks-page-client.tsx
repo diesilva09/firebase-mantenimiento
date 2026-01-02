@@ -8,7 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AddTaskDialog } from './add-task-dialog';
-import { EditTaskDialog } from './edit-task-dialog' // ✅ Agregar esta importación
+import { EditTaskDialog } from './edit-task-dialog';
 import { TaskCalendarView } from './task-calendar-view';
 import { TaskTableView } from './task-table-view';
 import { TaskDetailsDialog } from './task-details-dialog';
@@ -16,19 +16,13 @@ import { CompleteTaskDialog } from './complete-task-dialog';
 import { EquipmentInfoDialog } from './equipment-info-dialog';
 import type { Task, User, Schedule, Notification } from '@/lib/types';
 import { Card, CardContent } from '@/components/ui/card';
-import { 
-  mapDatabaseTaskToFrontend, 
-  fetchTasksFromDB, 
-  completeTaskInDB, 
-  deleteTaskInDB
-} from '@/lib/task-utils';
+import { mapDatabaseTaskToFrontend, fetchTasksFromDB, completeTaskInDB, deleteTaskInDB } from '@/lib/task-utils';
 import { useToast } from '@/hooks/use-toast';
 import { useUser } from '@/firebase/auth/use-user';
-import { useNotifications } from '@/hooks/use-notifications';
+import { useNotificationsContext as useNotifications } from '@/context/notifications-context';
 import { useDashboardSearch, SearchSuggestion } from '@/context/dashboard-search-context';
 
 type ViewMode = 'calendar' | 'table';
-
 const schedules: Schedule[] = ['Partes Altas', 'Equipo de Medición', 'Mantenimiento Locativo', 'Maquinaria'];
 
 interface TasksPageClientProps {
@@ -45,62 +39,50 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
   const [viewMode, setViewMode] = useState<ViewMode>('table');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState<Schedule>('Maquinaria');
-  
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
-  const [isEditTaskOpen, setIsEditTaskOpen] = useState(false); // ✅ Agregar este estado
+  const [isEditTaskOpen, setIsEditTaskOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isCompleteOpen, setIsCompleteOpen] = useState(false);
   const [isSpecsOpen, setIsSpecsOpen] = useState(false);
+  const [loadingSpecsId, setLoadingSpecsId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
 
   const { toast } = useToast();
-  const { markTasksCompletedAsRead, addNotification, permission } = useNotifications();
-
+  const { markTasksCompletedAsRead, addNotification, permission, requestPermission } = useNotifications();
   const { user } = useUser();
   const [isAdmin, setIsAdmin] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [seenCompletedIds, setSeenCompletedIds] = useState<string[]>([]);
   const [allTasksForSearch, setAllTasksForSearch] = useState<Task[]>([]);
+  const [alertedTasks, setAlertedTasks] = useState<Set<string>>(new Set());
 
-  // Búsqueda global desde el header
   const { query, setSuggestions } = useDashboardSearch();
   const normalizedQuery = query.trim().toLowerCase();
 
   useEffect(() => {
     let mounted = true;
-
     async function checkAdmin() {
       setCheckingAdmin(true);
       const email = user?.email?.toLowerCase().trim();
       setUserEmail(email || null);
-
       try {
         if (user) {
-          // Validar rol desde backend para mayor seguridad
           const response = await fetch('/api/auth/role', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              email: user.email,
-              uid: user.uid,
-            }),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: user.email, uid: user.uid }),
           });
-
           if (response.ok) {
             const roleData = await response.json();
             if (mounted) setIsAdmin(roleData.isAdmin);
           } else {
-            // Fallback a verificación local si la API falla
             if (email) {
               const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
                 .split(',')
-                .map((s) => s.trim().toLowerCase())
+                .map(s => s.trim().toLowerCase())
                 .filter(Boolean);
-
               const isEnvAdmin = adminEnv.includes(email);
               if (mounted) setIsAdmin(isEnvAdmin);
             } else {
@@ -112,13 +94,11 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         }
       } catch (error) {
         console.error('Error verificando rol de usuario:', error);
-        // Fallback seguro
         if (email) {
           const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
             .split(',')
-            .map((s) => s.trim().toLowerCase())
+            .map(s => s.trim().toLowerCase())
             .filter(Boolean);
-
           const isEnvAdmin = adminEnv.includes(email);
           if (mounted) setIsAdmin(isEnvAdmin);
         } else {
@@ -128,7 +108,6 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         if (mounted) setCheckingAdmin(false);
       }
     }
-
     if (user) {
       checkAdmin();
     } else {
@@ -136,24 +115,17 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
       setIsAdmin(false);
       setUserEmail(null);
     }
-    
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [user]);
 
   console.log('USER EMAIL EN TASKS:', userEmail, 'isAdmin:', isAdmin);
 
-  // Cargar TODAS las tareas para el buscador global (sin filtrar por cronograma)
   useEffect(() => {
     if (!userEmail) return;
     const loadAllTasks = async () => {
       try {
-        // Pasamos undefined como schedule para obtener todas las tareas
         const dbTasks = await fetchTasksFromDB(undefined, userEmail);
-        const mappedTasks = dbTasks.map(dbTask => 
-          mapDatabaseTaskToFrontend(dbTask, users)
-        );
+        const mappedTasks = dbTasks.map(dbTask => mapDatabaseTaskToFrontend(dbTask, users));
         setAllTasksForSearch(mappedTasks);
       } catch (error) {
         console.error('Error loading all tasks for search:', error);
@@ -162,7 +134,87 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
     loadAllTasks();
   }, [userEmail, users]);
 
-  // Registrar sugerencias globales para tareas (código + descripción)
+  useEffect(() => {
+    const checkDueTasks = async () => {
+      const now = new Date();
+      const tasksToAlert = tasks.filter(task => {
+        if (task.status === 'Completada' || !task.hasAlert || alertedTasks.has(task.id)) return false;
+        const taskDate = new Date(task.nextExecution);
+        const diff = taskDate.getTime() - now.getTime();
+        return diff <= 60000 && diff >= -60000;
+      });
+
+      for (const task of tasksToAlert) {
+        const taskDate = new Date(task.nextExecution);
+        let savedId = `alert-${task.id}-${Date.now()}`;
+        let severity = "info";
+        if (task.priority === "Alta") severity = "critical";
+        else if (task.priority === "Media") severity = "warning";
+
+        try {
+          const res = await fetch('/api/notificaciones', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              titulo: `Recordatorio de Tarea`,
+              mensaje: `La tarea ${task.code} está programada para ${taskDate.toLocaleTimeString()}`,
+              tipo: "task_alert",
+              severidad: severity,
+              estado_tarea: task.status,
+              prioridad: task.priority,
+              ref_task_id: task.id,
+            }),
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (json.data?.id) savedId = String(json.data.id);
+          }
+        } catch (e) {
+          console.error("Error guardando notificación de alerta", e);
+        }
+
+        const notif: Notification = {
+          id: savedId,
+          title: `Recordatorio de Tarea`,
+          message: `La tarea ${task.code} está programada para ${taskDate.toLocaleTimeString()}`,
+          type: "task_alert",
+          severity: severity,
+          createdAt: new Date().toISOString(),
+          read: false,
+          refId: task.id,
+          status: task.status,
+          priority: task.priority
+        } as any;
+
+        addNotification(notif);
+
+        if (permission === 'granted' && typeof window !== 'undefined' && 'Notification' in window) {
+          const browserNotif = new Notification(notif.title, {
+            body: notif.message,
+            tag: savedId,
+            data: { url: `${window.location.origin}/dashboard/tasks?selectedTaskId=${task.id}` }
+          });
+          browserNotif.onclick = (event) => {
+            event.preventDefault();
+            window.focus();
+            if (browserNotif.data?.url) {
+              window.location.href = browserNotif.data.url;
+            }
+          };
+        }
+
+        setAlertedTasks(prev => {
+          const newSet = new Set(prev);
+          newSet.add(task.id);
+          return newSet;
+        });
+      }
+    };
+
+    const interval = setInterval(checkDueTasks, 30000);
+    return () => clearInterval(interval);
+  }, [tasks, alertedTasks, addNotification, permission]);
+
   useEffect(() => {
     const source = allTasksForSearch.length > 0 ? allTasksForSearch : tasks;
     const items: SearchSuggestion[] = source.map((t) => ({
@@ -177,22 +229,17 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
     });
   }, [tasks, allTasksForSearch, setSuggestions]);
 
-  // Manejar selección de tarea desde el buscador global (Navegación y apertura automática)
   useEffect(() => {
     if (!selectedTaskId) return;
-    // Esperar a que carguen todas las tareas para buscar la seleccionada
     if (allTasksForSearch.length === 0) return;
-
     const task = allTasksForSearch.find((t) => t.id === selectedTaskId);
     if (task) {
-      // 1. Cambiar al cronograma correcto si es necesario (ej. Partes Altas)
       if (selectedSchedule !== task.schedule) {
         setSelectedSchedule(task.schedule);
       }
-      // 2. Abrir el modal de detalles
-      handleOpenDetails(task);
+      setSelectedTask(task);
+      setIsDetailsOpen(true);
 
-      // 3. Limpiar la URL para que no se vuelva a abrir al recargar
       const params = new URLSearchParams(window.location.search);
       params.delete('selectedTaskId');
       const newUrl = params.toString() ? `/dashboard/tasks?${params.toString()}` : '/dashboard/tasks';
@@ -200,43 +247,27 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
     }
   }, [selectedTaskId, allTasksForSearch, selectedSchedule]);
 
-  // Función para cargar tareas desde la BD
   const loadTasks = async (schedule?: string) => {
     setIsLoading(true);
     try {
       const dbTasks = await fetchTasksFromDB(schedule, userEmail);
-      const mappedTasks = dbTasks.map(dbTask => 
-        mapDatabaseTaskToFrontend(dbTask, users)
-      );
+      const mappedTasks = dbTasks.map(dbTask => mapDatabaseTaskToFrontend(dbTask, users));
       setTasks(mappedTasks);
-
-      // Marcar como leídas las notificaciones de tareas que ya estén completadas
-      const completedIds = mappedTasks
-        .filter(t => t.status === 'Completada')
-        .map(t => t.id);
-      markTasksCompletedAsRead(completedIds);
     } catch (error) {
       console.error('Error loading tasks:', error);
-      toast({
-        title: "Error",
-        description: "No se pudieron cargar las tareas",
-        variant: "destructive"
-      });
+      toast({ title: "Error", description: "No se pudieron cargar las tareas", variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Cargar tareas al cambiar de pestaña, solo cuando ya tenemos userEmail
   useEffect(() => {
     if (!userEmail) return;
     loadTasks(selectedSchedule);
   }, [selectedSchedule, userEmail]);
 
-  // Cargar IDs de tareas completadas ya vistas para este usuario
   useEffect(() => {
     if (!userEmail) return;
-
     const fetchSeen = async () => {
       try {
         const res = await fetch(`/api/tareas/vistas?userEmail=${encodeURIComponent(userEmail)}`);
@@ -248,7 +279,6 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         console.error('Error fetching seen completed tasks:', e);
       }
     };
-
     fetchSeen();
   }, [userEmail]);
 
@@ -256,28 +286,23 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
     setSelectedTask(task);
     setIsDetailsOpen(true);
   };
-  
+
   const handleOpenComplete = (task: Task) => {
     setSelectedTask(task);
     setIsCompleteOpen(true);
   };
 
-  // ✅ Agregar esta función
   const handleOpenEdit = (task: Task) => {
     setSelectedTask(task);
     setIsEditTaskOpen(true);
   };
 
-  // ✅ Agregar esta función
   const handleDeleteTask = async (taskId: string) => {
     try {
       const success = await deleteTaskInDB(taskId);
-
       if (success) {
-        // Actualizar el estado local
         setTasks(prev => prev.filter(task => task.id !== taskId));
         setDeleteTarget(null);
-        
         toast({
           title: "Tarea eliminada",
           description: "La tarea se ha eliminado correctamente.",
@@ -287,25 +312,65 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
       }
     } catch (error) {
       console.error('Error deleting task:', error);
-      toast({
-        title: "Error",
-        description: "No se pudo eliminar la tarea",
-        variant: "destructive"
-      });
+      toast({ title: "Error", description: "No se pudo eliminar la tarea", variant: "destructive" });
     }
   };
-  
+
   const handleOpenSpecs = (task: Task) => {
-    // Abrir siempre el modal de ficha técnica, aunque no haya equipmentSpecs.
-    // Si no hay datos, el diálogo simplemente mostrará una tabla vacía.
     setSelectedTask(task);
     setIsSpecsOpen(true);
   };
 
-  const handleAddTask = async (newTask: Omit<Task, 'id' | 'status'>) => {
+  const handleAddTask = async (newTask: Task) => {
     try {
-      // Recargar las tareas después de agregar una nueva
       await loadTasks(selectedSchedule);
+      let severity = "info";
+      if (newTask.priority === "Alta") severity = "critical";
+      else if (newTask.priority === "Media") severity = "warning";
+
+      // Determinar el estado correcto para la notificación
+      const executionDate = new Date(newTask.nextExecution);
+      const today = new Date();
+      const taskStatus: Task['status'] = executionDate > today ? 'Futura' : 'Pendiente';
+
+      const baseNotif: Omit<Notification, "id" | "createdAt"> = {
+        title: `Nueva Tarea: ${newTask.code ?? ''} - ${newTask.area ?? ''}`,
+        message: `Responsable: ${newTask.assignedTo?.name ?? 'Sin asignar'}\nFecha: ${new Date(newTask.nextExecution).toLocaleString()}\nPrioridad: ${newTask.priority ?? ''}\nDescripción: ${newTask.description ?? ''}`,
+        type: "task_alert",
+        severity: severity,
+        read: false,
+        refId: newTask.id,
+        status: taskStatus,
+        priority: newTask.priority,
+      } as any;
+
+      const notif: Notification = {
+        id: `new-task-${newTask.id}-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        ...baseNotif
+      } as any;
+
+      addNotification(notif);
+
+      // Solicitar permiso si está en 'default' (usuario aún no ha decidido)
+      let currentPermission = permission;
+      if (currentPermission === 'default' && typeof window !== 'undefined' && 'Notification' in window) {
+        currentPermission = await requestPermission();
+      }
+
+      if (currentPermission === 'granted' && typeof window !== 'undefined' && 'Notification' in window) {
+        const browserNotif = new Notification(baseNotif.title, {
+          body: baseNotif.message,
+          tag: `new-task-${newTask.id}`,
+          data: { url: `${window.location.origin}/dashboard/tasks?selectedTaskId=${newTask.id}` }
+        });
+        browserNotif.onclick = (event) => {
+          event.preventDefault();
+          window.focus();
+          if (browserNotif.data?.url) window.location.href = browserNotif.data.url;
+        };
+      }
+
       toast({
         title: "Tarea agregada",
         description: "La tarea se ha guardado correctamente",
@@ -315,47 +380,40 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
     }
   };
 
-  // Al editar una tarea, recargar siempre desde la BD para reflejar todos los cambios
   const handleEditTask = async (updatedTask: Task) => {
     await loadTasks(selectedSchedule);
-
+    setAlertedTasks(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(updatedTask.id);
+      return newSet;
+    });
     toast({
       title: "Tarea actualizada",
       description: `La tarea ${updatedTask.code} se ha actualizado correctamente.`,
     });
-
     setIsEditTaskOpen(false);
     setSelectedTask(null);
   };
 
-  // Marcar tareas completadas como "vistas" para este usuario
   const handleCompletedSeen = async (taskIds: string[]) => {
     try {
-      // Si no tenemos email del usuario, no hacemos nada
       if (!userEmail) return;
-
       await fetch('/api/tareas/vistas', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userEmail,
-          taskIds,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userEmail, taskIds }),
       });
-
-      // Actualizar estado local para que los contadores dejen de contar estas tareas
       setSeenCompletedIds((prev) => {
         const set = new Set(prev);
         taskIds.forEach((id) => set.add(id.toString()));
         return Array.from(set);
       });
+      markTasksCompletedAsRead(taskIds);
     } catch (error) {
       console.error('Error marcando tareas como vistas:', error);
     }
   };
-  
+
   const handleCompleteTask = async (
     taskId: string,
     workDone: string,
@@ -368,92 +426,130 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
   ) => {
     try {
       const success = await completeTaskInDB(
-        taskId, 
-        workDone, 
+        taskId,
+        workDone,
         executedBy.name,
         imageUrlBefore,
         imageUrlAfter
       );
-
       if (success) {
         const completionIso = new Date().toISOString();
-
-
-        // Actualizar el estado local
-        setTasks(prev => prev.map(task => 
-          task.id === taskId 
-            ? { 
-                ...task, 
-                status: 'Completada', 
-                workDone, 
-                executedBy,
-                completionDate: completionIso,
-                imageUrlBefore,
-                imageUrlAfter
-              }
+        setTasks(prev => prev.map(task =>
+          task.id === taskId
+            ? { ...task, status: 'Completada', workDone, executedBy, completionDate: completionIso, imageUrlBefore, imageUrlAfter }
             : task
         ));
 
-        // Marcar inmediatamente como leída la notificación de esta tarea completada
-        markTasksCompletedAsRead([taskId]);
-
-                // Crear notificación por tarea completada
-        try {
-          const baseTask = selectedTask || tasks.find(t => t.id === taskId) || null
-
-         const notif: Notification = {
-  id: `task-completed-${taskId}-${Date.now()}`,
-  title: `Tarea completada en ${baseTask?.area ?? 'Área sin nombre'}`,
-  message: `Equipo: ${baseTask?.code ?? ''}\nEjecutado por: ${executedBy.name}`,
-  type: "task_alert",
-  severity: "info",
-  createdAt: new Date().toISOString(),
-  read: false,
-  refId: taskId,
-  status: "Completada",
-}
-
-          addNotification(notif)
-
-          if (
-            permission === "granted" &&
-            typeof window !== "undefined" &&
-            "Notification" in window
-          ) {
-            new Notification(notif.title, {
-              body: notif.message,
-            })
+        let baseTask = selectedTask || tasks.find(t => t.id === taskId) || null;
+        if (!baseTask) {
+          try {
+            const dbTaskResponse = await fetch(`/api/tareas/${taskId}`);
+            if (dbTaskResponse.ok) {
+              const dbTask = await dbTaskResponse.json();
+              if (dbTask) baseTask = mapDatabaseTaskToFrontend(dbTask, users);
+            }
+          } catch (fetchError) {
+            console.warn('No se pudo obtener la tarea desde la BD para la notificación', fetchError);
           }
-        } catch (e) {
-          console.warn("No se pudo crear la notificación de tarea completada", e)
         }
-        
-      
 
-            // Registrar evento en equipos_historial (BD) solo para tareas de equipos
+        if (baseTask) {
+          const baseNotif: Omit<Notification, "id" | "createdAt"> = {
+            title: `Tarea Completada: ${baseTask.code ?? ''} - ${baseTask.area ?? 'Área sin nombre'}`,
+            message: `Ejecutado por: ${executedBy.name}\nPrioridad: ${baseTask.priority ?? ''}\nTrabajo: ${workDone}`,
+            type: "task_alert",
+            severity: "success",
+            read: false,
+            refId: taskId,
+            status: "Completada",
+          };
+
+          let finalNotif: Notification | null = null;
+          try {
+            const resNotif = await fetch(`${window.location.origin}/api/notificaciones`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                titulo: baseNotif.title,
+                mensaje: baseNotif.message,
+                tipo: baseNotif.type,
+                severidad: baseNotif.severity,
+                estado_tarea: baseNotif.status,
+                prioridad: baseTask.priority,
+                ref_task_id: taskId,
+              }),
+            });
+            if (resNotif.ok) {
+              const jsonNotif = await resNotif.json();
+              const saved = jsonNotif.data;
+              finalNotif = {
+                id: String(saved.id),
+                title: baseNotif.title,
+                message: baseNotif.message,
+                type: baseNotif.type,
+                severity: baseNotif.severity,
+                createdAt: new Date(saved.creado_en).toISOString(),
+                read: false,
+                refId: String(saved.ref_task_id ?? baseNotif.refId ?? ""),
+                status: baseNotif.status,
+                priority: baseTask.priority,
+              } as any;
+            }
+          } catch (e) {
+            console.warn('No se pudo guardar la notificación de tarea completada en BD', e);
+          }
+
+          const notif: Notification = finalNotif ?? {
+            id: `task-completed-${taskId}-${Date.now()}`,
+            title: baseNotif.title,
+            message: baseNotif.message,
+            type: baseNotif.type,
+            severity: baseNotif.severity,
+            createdAt: new Date().toISOString(),
+            read: false,
+            refId: baseNotif.refId,
+            status: baseNotif.status,
+            priority: baseTask.priority,
+          } as any;
+
+          addNotification(notif);
+
+          let currentPermission = permission;
+          if (currentPermission === 'default' && typeof window !== 'undefined' && 'Notification' in window) {
+            currentPermission = await requestPermission();
+          }
+
+          if (currentPermission === 'granted' && typeof window !== 'undefined' && 'Notification' in window) {
+            const browserNotif = new Notification(notif.title, {
+              body: notif.message,
+              tag: `task-completed-${taskId}`,
+              data: { url: `${window.location.origin}/dashboard/tasks?selectedTaskId=${taskId}` }
+            });
+            browserNotif.onclick = (event) => {
+              event.preventDefault();
+              window.focus();
+              if (browserNotif.data?.url) window.location.href = browserNotif.data.url;
+            };
+          }
+        }
+
         try {
-          const baseTask = selectedTask || tasks.find(t => t.id === taskId) || null;
-          const isEquipoSchedule =
-            baseTask && (baseTask.schedule === 'Maquinaria' || baseTask.schedule === 'Equipo de Medición');
-          
+          const isEquipoSchedule = baseTask && (baseTask.schedule === 'Maquinaria' || baseTask.schedule === 'Equipo de Medición');
           const numericTaskId = parseInt(taskId, 10);
-
           if (baseTask && isEquipoSchedule && baseTask.code && !isNaN(numericTaskId)) {
             await fetch('/api/equipos/historial', {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                codigoEquipo: baseTask.code,            // referencia a equipos(codigo)
-                tareaId: numericTaskId,                 // referencia a tareas_cronograma(id)
-                fechaEvento: completionIso,             // fecha_evento
-                labor: workDone,                        // trabajo realizado
-                tipoMantenimiento: tipoMantenimiento,   // tipo_mantenimiento
-                repuestosUsados: repuestos,             // repuestos_usados
-                observaciones: observaciones,           // observaciones
-                ejecutadoPor: executedBy.name,          // ejecutado_por
-                creadoPor: userEmail || null,           // creado_por (email del usuario actual)
+                codigoEquipo: baseTask.code,
+                tareaId: numericTaskId,
+                fechaEvento: completionIso,
+                labor: workDone,
+                tipoMantenimiento: tipoMantenimiento,
+                repuestosUsados: repuestos,
+                observaciones: observaciones,
+                ejecutadoPor: executedBy.name,
+                creadoPor: userEmail || null,
               }),
             });
           }
@@ -461,28 +557,22 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
           console.warn('No se pudo registrar la tarea en equipos_historial', e);
         }
 
-           
-        // Registrar evento en zonas_historial (BD) para tareas asociadas a zonas
         try {
-          const baseTaskForZona = selectedTask || tasks.find(t => t.id === taskId) || null;
           const numericTaskId = parseInt(taskId, 10);
-
-          if (baseTaskForZona && baseTaskForZona.code && !isNaN(numericTaskId)) {
+          if (baseTask && baseTask.code && !isNaN(numericTaskId)) {
             await fetch('/api/zonas/historial', {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                codigoZona: baseTaskForZona.code,      // referencia a zonas(codigo)
-                tareaId: numericTaskId,                // referencia a tareas_cronograma(id)
-                fechaEvento: completionIso,            // fecha_evento
-                labor: workDone,                       // trabajo realizado
-                tipoMantenimiento: tipoMantenimiento,  // tipo_mantenimiento
-                repuestosUsados: repuestos,            // repuestos_usados
-                observaciones: observaciones,          // observaciones
-                ejecutadoPor: executedBy.name,         // ejecutado_por
-                creadoPor: userEmail || null,          // creado_por (email del usuario actual)
+                codigoZona: baseTask.code,
+                tareaId: numericTaskId,
+                fechaEvento: completionIso,
+                labor: workDone,
+                tipoMantenimiento: tipoMantenimiento,
+                repuestosUsados: repuestos,
+                observaciones: observaciones,
+                ejecutadoPor: executedBy.name,
+                creadoPor: userEmail || null,
               }),
             });
           }
@@ -494,7 +584,6 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
           title: "Tarea completada",
           description: `La tarea ${selectedTask?.code} ha sido marcada como completada.`,
         });
-        
         setIsCompleteOpen(false);
         setSelectedTask(null);
       } else {
@@ -502,18 +591,12 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
       }
     } catch (error) {
       console.error('Error completing task:', error);
-      toast({
-        title: "Error",
-        description: "No se pudo completar la tarea",
-        variant: "destructive"
-      });
+      toast({ title: "Error", description: "No se pudo completar la tarea", variant: "destructive" });
     }
   };
 
-  // Aplicar filtro de búsqueda a todas las tareas visibles
   const visibleTasks = useMemo(() => {
     if (!normalizedQuery) return tasks;
-
     return tasks.filter((t) => {
       const haystack = [
         t.code,
@@ -521,10 +604,7 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         t.area,
         t.assignedTo?.name,
         t.executedBy?.name,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
+      ].filter(Boolean).join(' ').toLowerCase();
       return haystack.includes(normalizedQuery);
     });
   }, [tasks, normalizedQuery]);
@@ -537,29 +617,27 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
       'Maquinaria': [],
     };
     visibleTasks.forEach(task => {
-      if (grouped[task.schedule]) {
-        grouped[task.schedule].push(task);
-      }
+      if (grouped[task.schedule]) grouped[task.schedule].push(task);
     });
     return grouped;
   }, [visibleTasks]);
 
   const sortedTasks = useMemo(() => {
-    return [...visibleTasks].sort(
-      (a, b) => new Date(a.nextExecution).getTime() - new Date(b.nextExecution).getTime()
+    return [...visibleTasks].sort((a, b) =>
+      new Date(a.nextExecution).getTime() - new Date(b.nextExecution).getTime()
     );
   }, [visibleTasks]);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Gestor de Tareas</h1>
           <p className="text-sm text-muted-foreground">
-             {visibleTasks.filter(t => t.status !== 'Completada').length} tareas encontradas
+            {visibleTasks.filter(t => t.status !== 'Completada').length} tareas encontradas
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
           <ToggleGroup type="single" value={viewMode} onValueChange={(value: ViewMode) => value && setViewMode(value)}>
             <ToggleGroupItem value="calendar" aria-label="Vista de calendario">
               <Calendar className="h-4 w-4" />
@@ -568,16 +646,14 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
               <List className="h-4 w-4" />
             </ToggleGroupItem>
           </ToggleGroup>
-          <Button 
-            variant="outline" 
-            onClick={() => loadTasks(selectedSchedule)}
-            disabled={isLoading}
-          >
+          <Button variant="outline" onClick={() => loadTasks(selectedSchedule)} disabled={isLoading} className="flex-1 md:flex-none">
             <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
             Actualizar
           </Button>
           {isAdmin && (
-            <Button onClick={() => setIsAddTaskOpen(true)}>Agregar Nueva Labor</Button>
+            <Button onClick={() => setIsAddTaskOpen(true)} className="flex-1 md:flex-none">
+              Agregar Labor
+            </Button>
           )}
         </div>
       </div>
@@ -585,17 +661,10 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
       {viewMode === 'calendar' ? (
         <Card>
           <CardContent className="p-0 sm:p-6">
-            <Tabs 
-              defaultValue="Maquinaria" 
-              value={selectedSchedule}
-              onValueChange={(value) => setSelectedSchedule(value as Schedule)}
-            >
-              <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2 md:grid-cols-4 h-auto">
+            <Tabs defaultValue="Maquinaria" value={selectedSchedule} onValueChange={(value) => setSelectedSchedule(value as Schedule)}>
+              <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 h-auto gap-1 sm:gap-0">
                 {schedules.map(schedule => {
-                  const totalNoCompletadas = (tasksBySchedule[schedule] || []).filter(
-                    (t) => t.status !== 'Completada'
-                  ).length;
-
+                  const totalNoCompletadas = (tasksBySchedule[schedule] || []).filter(t => t.status !== 'Completada').length;
                   return (
                     <TabsTrigger key={schedule} value={schedule} className="w-full">
                       {schedule}
@@ -606,40 +675,32 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
                   );
                 })}
               </TabsList>
-              
               {schedules.map(schedule => (
                 <TabsContent key={schedule} value={schedule} className="mt-4">
-                    <TaskCalendarView 
-                      tasks={tasksBySchedule[schedule]} 
-                      onTaskClick={handleOpenDetails}
-                    />
+                  <TaskCalendarView tasks={tasksBySchedule[schedule]} onTaskClick={handleOpenDetails} />
                 </TabsContent>
               ))}
             </Tabs>
           </CardContent>
         </Card>
       ) : (
-        <TaskTableView 
+        <TaskTableView
           tasks={sortedTasks}
           users={users}
           isAdmin={isAdmin}
           onOpenComplete={handleOpenComplete}
-          onOpenEdit={handleOpenEdit} // ✅ Agregar esta prop
-          onDeleteTask={handleDeleteTask} // ✅ Agregar esta prop
+          onOpenEdit={handleOpenEdit}
+          onDeleteTask={handleDeleteTask}
           onOpenSpecs={handleOpenSpecs}
+          loadingSpecsId={loadingSpecsId}
           onTaskClick={handleOpenDetails}
           seenCompletedIds={seenCompletedIds}
           onCompletedSeen={handleCompletedSeen}
         />
       )}
 
-      <AddTaskDialog
-        isOpen={isAddTaskOpen}
-        setIsOpen={setIsAddTaskOpen}
-        onAddTask={handleAddTask}
-        users={users}
-      />
-      
+      <AddTaskDialog isOpen={isAddTaskOpen} setIsOpen={setIsAddTaskOpen} onAddTask={handleAddTask} users={users} />
+
       {selectedTask && (
         <>
           <TaskDetailsDialog
@@ -648,10 +709,9 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
             task={selectedTask}
             isAdmin={isAdmin}
             onOpenComplete={handleOpenComplete}
-            onOpenEdit={handleOpenEdit} 
+            onOpenEdit={handleOpenEdit}
             onOpenSpecs={handleOpenSpecs}
           />
-          
           <EditTaskDialog
             isOpen={isEditTaskOpen}
             setIsOpen={setIsEditTaskOpen}
@@ -659,7 +719,6 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
             users={users}
             onEditTask={handleEditTask}
           />
-          
           <CompleteTaskDialog
             isOpen={isCompleteOpen}
             setIsOpen={setIsCompleteOpen}
@@ -667,7 +726,6 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
             users={users}
             onComplete={handleCompleteTask}
           />
-          
           <EquipmentInfoDialog
             isOpen={isSpecsOpen}
             setIsOpen={setIsSpecsOpen}
@@ -683,26 +741,15 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
               <DialogTitle>Eliminar tarea</DialogTitle>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
-              ¿Estás seguro de que quieres eliminar la tarea
-              {" "}
-              <span className="font-medium">
-                {deleteTarget.code} - {deleteTarget.description}
-              </span>
-              ? Esta acción no se puede deshacer.
+              ¿Estás seguro de que quieres eliminar la tarea{" "}
+              <span className="font-medium">{deleteTarget.code} - {deleteTarget.description}</span>?
+              Esta acción no se puede deshacer.
             </p>
             <DialogFooter className="mt-4">
-              <Button
-                variant="outline"
-                type="button"
-                onClick={() => setDeleteTarget(null)}
-              >
+              <Button variant="outline" type="button" onClick={() => setDeleteTarget(null)}>
                 Cancelar
               </Button>
-              <Button
-                variant="destructive"
-                type="button"
-                onClick={() => handleDeleteTask(deleteTarget.id)}
-              >
+              <Button variant="destructive" type="button" onClick={() => handleDeleteTask(deleteTarget.id)}>
                 Eliminar
               </Button>
             </DialogFooter>

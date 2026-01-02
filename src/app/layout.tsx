@@ -3,7 +3,8 @@ import './globals.css';
 import { cn } from '@/lib/utils';
 import { Toaster } from "@/components/ui/toaster"
 import { FirebaseProvider } from '@/firebase/provider';
-import { NotificationsProvider } from "@/context/notifications-context";
+import { ClientNotificationsProvider } from "@/components/client-notifications-provider";
+
 
 const FAV_VERSION = "1"
 
@@ -37,9 +38,9 @@ export default function RootLayout({
       </head>
       <body className={cn("font-code antialiased", "min-h-screen bg-background font-sans")}>
         <FirebaseProvider>
-          <NotificationsProvider>
+          <ClientNotificationsProvider>
             {children}
-          </NotificationsProvider>
+          </ClientNotificationsProvider>
         </FirebaseProvider>
         <Toaster />
       </body>

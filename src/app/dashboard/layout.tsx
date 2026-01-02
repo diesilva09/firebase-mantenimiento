@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { ClipboardList, LayoutGrid, Wrench, MapPin } from "lucide-react"
 import { DashboardSearchProvider } from "@/context/dashboard-search-context";
+import { GlobalSearchSuggestions } from "@/components/global-search-suggestions"
 
 
 import { cn } from "@/lib/utils"
@@ -106,10 +107,11 @@ export default function DashboardLayout({
       </Sidebar>
       <SidebarInset>
          <DashboardSearchProvider>
-        <DashboardHeader />
-        <main className="p-4 sm:p-6 lg:p-8">
-          {children}
-        </main>
+          <GlobalSearchSuggestions />
+          <DashboardHeader />
+          <main className="p-4 sm:p-6 lg:p-8">
+            {children}
+          </main>
         </DashboardSearchProvider>
       </SidebarInset>
     </SidebarProvider>

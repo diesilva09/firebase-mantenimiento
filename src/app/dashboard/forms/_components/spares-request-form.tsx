@@ -9,7 +9,8 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { TechnicianSelectField } from "./technician-select-field"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
+import { useEquipos } from "@/hooks/use-equipos"
 
 const formSchema = z.object({
   repuesto: z.string().min(1, "El repuesto es requerido."),
@@ -19,13 +20,13 @@ const formSchema = z.object({
   tecnico: z.string().min(1, "Selecciona o escribe el técnico solicitante."),
 })
 
-type EquipmentLookup = { codigo: string; nombre: string; area?: string | null; linea?: string | null }
-
 export function SparesRequestForm() {
   const { toast } = useToast()
   const [isLoading, setIsLoading] = useState(false)
+  
+  // Usar el hook para obtener los equipos
+  const { equipos } = useEquipos()
 
-  const [equipos, setEquipos] = useState<EquipmentLookup[]>([])
   const [maquinaQuery, setMaquinaQuery] = useState("")
   const [showMaquinaSuggestions, setShowMaquinaSuggestions] = useState(false)
   
@@ -39,25 +40,6 @@ export function SparesRequestForm() {
       tecnico: "",
     },
   })
-
-  useEffect(() => {
-    try {
-      const raw = typeof window !== "undefined" ? localStorage.getItem("equipos") : null
-      if (!raw) return
-      const parsed = JSON.parse(raw) as any[]
-      const mapped: EquipmentLookup[] = parsed
-        .filter((e) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
-        .map((e) => ({
-          codigo: e.codigo,
-          nombre: e.nombre,
-          area: e.area ?? null,
-          linea: e.linea ?? null,
-        }))
-      setEquipos(mapped)
-    } catch (e) {
-      console.warn("No se pudo cargar la lista de equipos para autocompletar", e)
-    }
-  }, [])
 
   const filteredEquipos = useMemo(() => {
     const q = maquinaQuery.trim().toLowerCase()
@@ -99,6 +81,7 @@ export function SparesRequestForm() {
           description: "La solicitud de repuestos ha sido enviada y guardada.",
         })
         form.reset()
+        setMaquinaQuery("") // Limpiar el campo de búsqueda de máquina
       } else {
         throw new Error(result.error || result.details)
       }
@@ -168,6 +151,7 @@ export function SparesRequestForm() {
                     if (maquinaQuery) setShowMaquinaSuggestions(true)
                   }}
                   onBlur={() => {
+                    // Usar un timeout pequeño para permitir que el click en la sugerencia se registre
                     setTimeout(() => setShowMaquinaSuggestions(false), 150)
                   }}
                 />
@@ -184,8 +168,10 @@ export function SparesRequestForm() {
                         const areaText = e.area ?? "Sin área"
                         const lineaText = e.linea ?? "Sin línea"
                         const label = `${e.codigo} - ${areaText}${e.linea ? ` - ${lineaText}` : ""} - ${e.nombre}`
-                        // Mostrar en el input el label completo (código - área - línea - equipo)
+                        
+                        // Actualizar el valor del input de búsqueda
                         setMaquinaQuery(label)
+                        // Actualizar el valor del formulario
                         field.onChange(label)
                         setShowMaquinaSuggestions(false)
                       }}
