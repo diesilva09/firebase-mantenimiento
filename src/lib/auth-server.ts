@@ -6,11 +6,27 @@ const adminConfigured = Boolean(
     process.env.FIREBASE_PRIVATE_KEY,
 )
 
+// --- CONFIGURACIÓN DE ROLES Y CORREOS ---
+// Aquí asignas los correos de Firebase a cada rol.
+// Puedes usar variables de entorno o escribirlos directamente aquí.
+const ROLE_ASSIGNMENTS = {
+  JEFE: [
+    ...(process.env.NEXT_PUBLIC_ADMIN_EMAILS || "").split(",").map(s => s.trim().toLowerCase()),
+    // Puedes agregar más correos fijos aquí si prefieres no usar variables de entorno
+    "mantenimietojefe@gmail.com",
+    "mantenimientojefe@gmail.com",
+  ],
+  TECNICO: [
+    // Lista de correos de técnicos
+    "mantenimietot@gmail.com",
+  ]
+}
+
 export async function requireAdminFromRequest(req: Request) {
   // Si Firebase Admin no está configurado (entorno local/demo),
   // permitir siempre el acceso como admin para no bloquear el desarrollo.
   if (!adminConfigured) {
-    return { ok: true, email: "local-dev@dummy" }
+    return { ok: true, email: "local-dev@dummy", role: "JEFE" }
   }
 
   const authHeader = req.headers.get("authorization")
@@ -24,24 +40,36 @@ export async function requireAdminFromRequest(req: Request) {
 
   try {
     const decoded = await admin.auth().verifyIdToken(token)
+
     const email = decoded.email?.toLowerCase().trim()
+
+    // Validar que el email haya sido verificado por el usuario (clic en el link de Firebase)
+    // EXCEPCIÓN: Permitir entrar a los jefes principales sin verificar
+    const isMainJefe = email === "mantenimietojefe@gmail.com" || email === "mantenimientojefe@gmail.com"
+    if (!decoded.email_verified && !isMainJefe) {
+      return { ok: false, status: 403, message: "Debes verificar tu correo electrónico para acceder." }
+    }
 
     if (!email) {
       return { ok: false, status: 401, message: "No autenticado" }
     }
 
-    const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "")
-      .split(",")
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean)
+    // Determinar el rol basado en las listas definidas arriba
+    const isJefe = ROLE_ASSIGNMENTS.JEFE.includes(email)
+    const isTecnico = ROLE_ASSIGNMENTS.TECNICO.includes(email)
 
-    const isAdmin = adminEnv.includes(email)
-
-    if (!isAdmin) {
+    // Si no está en ninguna lista, no tiene acceso
+    if (!isJefe && !isTecnico) {
       return { ok: false, status: 403, message: "No autorizado" }
     }
 
-    return { ok: true, email }
+    // Retornamos el rol detectado para que la API sepa quién es
+    return { 
+      ok: true, 
+      email, 
+      role: isJefe ? 'JEFE' : 'TECNICO' 
+    }
+
   } catch {
     return { ok: false, status: 401, message: "Token inválido" }
   }

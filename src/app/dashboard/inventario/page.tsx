@@ -20,11 +20,12 @@ import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Eye, MoreHorizontal } from "lucide-react"
+import { Eye, MoreHorizontal, Download, FileSpreadsheet, FileText, File } from "lucide-react"
 import { initializeFirebase } from "@/firebase"
 import { useNotificationsContext as useNotifications } from "@/context/notifications-context"
 import { EquipmentDetailModal } from "@/components/equipment-detail-modal"
 import type { Notification } from "@/lib/types"
+
 
 // helper
 async function getAuthHeaders() {
@@ -42,6 +43,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { formatPrice } from '@/lib/utils'
+import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
 import { repuestoSchema, RepuestoForm, RepuestoItem, CATEGORIAS, CATEGORIA_LABELS, CATEGORIA_SUBCATEGORIAS } from '@/lib/repuestos'
 
 // helper
@@ -63,7 +65,7 @@ export default function InventarioPage() {
   const [isAdmin, setIsAdmin] = useState(false)
 
   const [repuestos, setRepuestos] = useState<RepuestoItem[]>([])
-  const [loadingRepuestos, setLoadingRepuestos] = useState(false)
+  const [loadingRepuestos, setLoadingRepuestos] = useState(true)
   const [errorRepuestos, setErrorRepuestos] = useState<string | null>(null)
   const [expandedCategoria, setExpandedCategoria] = useState<string | null>(null)
   const [subcategoriaFilters, setSubcategoriaFilters] = useState<Record<string, string>>({})
@@ -78,7 +80,7 @@ export default function InventarioPage() {
       ? user.email.toLowerCase().trim()
       : null
 
-    const isBoss = normalizedEmail === "mantenimiento.admin@coruna.com"
+    const isBoss = normalizedEmail === "mantenimietojefe@gmail.com"
     setIsAdmin(isBoss)
   }, [user])
 
@@ -810,6 +812,27 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
     ? equipos.find((e: any) => e.codigo === machineDetailCode)
     : null
 
+  const handleExport = (format: 'excel' | 'pdf' | 'word') => {
+    const dataToExport = repuestos.map((r) => ({
+      'Código': r.codigo,
+      'Nombre': r.nombre,
+      'Categoría': r.categoria,
+      'Subcategoría': r.subcategoria || '-',
+      'Codigo Compra': r.codigoCompra || '-',
+      'Ubicación': r.ubicacion || '-',
+      'Stock Actual': r.stockActual,
+      'Stock Mínimo': r.stockMinimo,
+      'Precio': r.precio,
+      'Proveedor': r.proveedor || '-'
+    }))
+
+    const columns = ['Código', 'Nombre', 'Categoría', 'Subcategoría', 'Codigo Compra', 'Stock Actual', 'Stock Mínimo', 'Precio', 'Proveedor']
+    const filename = `Inventario_Repuestos_${new Date().toISOString().split('T')[0]}`
+
+    if (format === 'excel') exportToExcel(dataToExport, filename)
+    else if (format === 'pdf') exportToPDF(dataToExport, columns, 'Inventario de Repuestos', filename)
+    else if (format === 'word') exportToWord(dataToExport, columns, 'Inventario de Repuestos', filename)
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-3 sm:px-4">
@@ -823,6 +846,27 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
         </div>
 
         <div className="flex gap-2 self-start sm:self-auto">
+          
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="gap-2">
+                <Download className="h-4 w-4" />
+                <span className="hidden sm:inline">Exportar</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExport('excel')}>
+                <FileSpreadsheet className="mr-2 h-4 w-4 text-green-600" /> Excel
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                <FileText className="mr-2 h-4 w-4 text-red-600" /> PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('word')}>
+                <File className="mr-2 h-4 w-4 text-blue-600" /> Word
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           {isAdmin && (
             <Button
               className="bg-red-600 hover:bg-red-700"
@@ -845,6 +889,12 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
           Inventario organizado por categoría
         </div>
 
+        {loadingRepuestos ? (
+          <div className="flex flex-col items-center justify-center py-12">
+            <div className="mb-2 h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
+            <span className="text-sm text-muted-foreground">Cargando repuestos...</span>
+          </div>
+        ) : (
         <div className="divide-y">
           {/* Mecánica */}
           <div>
@@ -1636,6 +1686,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
             )}
           </div>
         </div>
+        )}
       </div>
 
       {/* Dialog de preview de imagen */}
@@ -2096,7 +2147,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
 
                             <FormItem>
 
-                              <FormLabel>Stock máximo</FormLabel>
+                              <FormLabel>Stock actual</FormLabel>
 
                               <FormControl>
 

@@ -35,6 +35,7 @@ export async function query(text: string, params?: any[]) {
 
 // Only attempt to import Prisma when explicitly enabled to avoid bundler
 // errors in repos that haven't adopted Prisma yet.
+/*
 if (process.env.PRISMA_ENABLED === 'true') {
   // Dynamic import using a more webpack-friendly approach
   const loadPrisma = () => {
@@ -56,6 +57,7 @@ if (process.env.PRISMA_ENABLED === 'true') {
   prismaClient = global.prisma || loadPrisma();
   if (process.env.NODE_ENV !== 'production') global.prisma = prismaClient;
 }
+*/
 
 if (!prismaClient) {
   // Lightweight stub that throws helpful errors when a DB operation is attempted.

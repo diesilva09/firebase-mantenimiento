@@ -21,6 +21,14 @@ import { useEquipos } from '@/hooks/use-equipos'
 import { useDashboardSearch, SearchSuggestion } from '@/context/dashboard-search-context'
 import { EquipmentDetailModal } from "@/components/equipment-detail-modal"
 import { useNotifications } from "@/hooks/use-notifications"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Download, FileSpreadsheet, FileText, File } from "lucide-react"
+import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
 
 const equipmentSchema = z.object({
   codigo: z.string().min(1, "El código es requerido").max(50, "El código es muy largo"),
@@ -153,6 +161,7 @@ export default function EquiposPage() {
 
               const isEnvAdmin = adminEnv.includes(email)
               if (mounted) setIsAdmin(isEnvAdmin)
+              if (mounted) setIsAdmin(isEnvAdmin && user.emailVerified)
             } else {
               if (mounted) setIsAdmin(false)
             }
@@ -172,6 +181,7 @@ export default function EquiposPage() {
 
           const isEnvAdmin = adminEnv.includes(email)
           if (mounted) setIsAdmin(isEnvAdmin)
+          if (mounted) setIsAdmin(isEnvAdmin && user.emailVerified)
         } else {
           if (mounted) setIsAdmin(false)
         }
@@ -211,6 +221,7 @@ export default function EquiposPage() {
     },
   })
 
+  
   const { toast } = useToast()
 
   const [view, setView] = useState<"form" | "list">(() => {
@@ -233,6 +244,7 @@ export default function EquiposPage() {
     | "Bodega"
     | "Otros"
   >("all")
+  
 
   // Filtros adicionales
   const [estadoFilter, setEstadoFilter] = useState<string>("all") // "all", "Operativo", "En mantenimiento", "Fuera de servicio"
@@ -670,6 +682,31 @@ export default function EquiposPage() {
     }
   }
 
+  const handleExport = (format: 'excel' | 'pdf' | 'word') => {
+    // Preparar los datos para exportación (aplanar objetos si es necesario)
+    const dataToExport = equipos.map(e => ({
+      'Código': e.codigo,
+      'Nombre': e.nombre,
+      'Área': e.area,
+      'Línea': e.linea || '-',
+      'Marca': e.marca || '-',
+      'Modelo': e.modelo || '-',
+      'Estado': e.estado,
+    
+    }));
+
+    const columns = ['Código', 'Nombre', 'Área', 'Línea', 'Marca', 'Modelo', 'Estado'];
+    const filename = `Inventario_Equipos_${new Date().toISOString().split('T')[0]}`;
+
+    if (format === 'excel') {
+      exportToExcel(dataToExport, filename);
+    } else if (format === 'pdf') {
+      exportToPDF(dataToExport, columns, 'Inventario de Equipos', filename);
+    } else if (format === 'word') {
+      exportToWord(dataToExport, columns, 'Inventario de Equipos', filename);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-4xl px-2 sm:px-0">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -712,6 +749,28 @@ export default function EquiposPage() {
             >
               Registrar
             </Button>
+            
+            {/* Botón de Exportar */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="w-full sm:w-auto gap-2">
+                  <Download className="h-4 w-4" />
+                  Exportar
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExport('excel')}>
+                  <FileSpreadsheet className="mr-2 h-4 w-4 text-green-600" /> Excel
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                  <FileText className="mr-2 h-4 w-4 text-red-600" /> PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('word')}>
+                  <File className="mr-2 h-4 w-4 text-blue-600" /> Word
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             <Button
               variant={view === "list" ? "default" : "ghost"}
               onClick={() => setView("list")}
@@ -1014,6 +1073,11 @@ export default function EquiposPage() {
             <div className="rounded-md border bg-card p-3 sm:p-4 text-sm text-muted-foreground">
               {checkingAdmin || userLoading ? (
                 <div>Comprobando permisos...</div>
+              ) : user && !user.emailVerified ? (
+                <div className="flex flex-col gap-2 text-yellow-600">
+                  <p className="font-medium">⚠️ Correo no verificado</p>
+                  <p>Para registrar equipos, debes verificar tu correo electrónico. Revisa tu bandeja de entrada o spam.</p>
+                </div>
               ) : (
                 <div>No estás autorizado para registrar equipos. Inicia sesión con una cuenta autorizada.</div>
               )}

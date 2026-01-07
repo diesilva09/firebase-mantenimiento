@@ -15,17 +15,25 @@ export async function POST(req: Request) {
     // Validar email contra base de datos de usuarios autorizados
     // Aquí puedes implementar la lógica específica para tu sistema
     const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',')?.map(e => e.trim().toLowerCase()) || [];
-    const isAdmin = adminEmails.includes(email.toLowerCase());
+    const cleanEmail = email.toLowerCase();
+    
+    const isJefe = adminEmails.includes(cleanEmail) || 
+                   cleanEmail === "mantenimietojefe@gmail.com" || 
+                   cleanEmail === "mantenimientojefe@gmail.com";
+                   
+    const isTecnico = cleanEmail === "mantenimietot@gmail.com" || 
+                      cleanEmail === "mantenimientot@gmail.com";
     
     // Aquí puedes implementar lógica más compleja como verificar en una tabla de usuarios
     // const userQuery = await query('SELECT role FROM usuarios WHERE email = $1', [email]);
     // const userRole = userQuery.rows[0]?.role || 'user';
     
     return NextResponse.json({
-      isAdmin,
-      permissions: isAdmin 
+      isAdmin: isJefe,
+      role: isJefe ? 'JEFE' : (isTecnico ? 'TECNICO' : 'NONE'),
+      permissions: isJefe 
         ? ['read', 'write', 'delete', 'admin', 'create', 'update'] 
-        : ['read']
+        : (isTecnico ? ['read', 'write'] : ['read'])
     });
   } catch (error) {
     console.error('Error verificando rol de usuario:', error);

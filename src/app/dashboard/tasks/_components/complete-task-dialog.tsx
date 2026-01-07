@@ -135,15 +135,6 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
   }
 
   function onSubmit(data: CompleteFormValues) {
-    // Mapeo simple de los valores del Select a nombres de técnico
-    const techNameMap: Record<string, string> = {
-      "luis-bohorquez": "Luis Bohorquez",
-      "duvan-guevara": "Duvan Guevara",
-      "juan-david-caro": "Juan David Caro",
-      "sergio-rubiano": "Sergio Rubiano",
-      "javier-morales": "Javier Morales",
-    };
-
     let executedByUser: User;
 
     if (data.executedById === "otro" && data.customExecutedBy) {
@@ -154,15 +145,33 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
         avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`,
       };
     } else {
-      const name = techNameMap[data.executedById];
-      if (!name) {
-        return;
+      const selectedUser = users.find(u => u.id === data.executedById);
+      
+      if (selectedUser) {
+        executedByUser = {
+          id: selectedUser.id,
+          name: selectedUser.name,
+          avatarUrl: selectedUser.avatarUrl || `https://picsum.photos/seed/${encodeURIComponent(selectedUser.name)}/40/40`,
+        };
+      } else {
+        // Fallback para usuarios hardcoded si no están en la lista users
+        const techNameMap: Record<string, string> = {
+          "luis-bohorquez": "Luis Bohorquez",
+          "duvan-guevara": "Duvan Guevara",
+          "juan-david-caro": "Juan David Caro",
+          "sergio-rubiano": "Sergio Rubiano",
+          "javier-morales": "Javier Morales",
+        };
+        const name = techNameMap[data.executedById];
+        
+        if (!name) return;
+
+        executedByUser = {
+          id: data.executedById,
+          name,
+          avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`,
+        };
       }
-      executedByUser = {
-        id: data.executedById,
-        name,
-        avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`,
-      };
     }
 
     onComplete(
@@ -217,6 +226,9 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
                         <SelectItem value="juan-david-caro">Juan David Caro</SelectItem>
                         <SelectItem value="sergio-rubiano">Sergio Rubiano</SelectItem>
                         <SelectItem value="javier-morales">Javier Morales</SelectItem>
+                        {users.map((user) => (
+                          <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
+                        ))}
                         <SelectItem value="otro">Otro técnico</SelectItem>
                        </SelectContent>
                     </Select>

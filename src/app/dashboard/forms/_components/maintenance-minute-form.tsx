@@ -17,6 +17,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { TechnicianSelectField } from "./technician-select-field"
 import { useState } from "react"
 
+
+
 const formSchema = z
   .object({
     tecnico: z.string().min(1, "Selecciona o escribe el técnico."),
@@ -282,3 +284,4 @@ export function MaintenanceMinuteForm() {
     </Form>
   )
 }
+

@@ -15,6 +15,7 @@ import { useSearchParams } from "next/navigation"
 import type { Notification } from "@/lib/types"
 
 
+
 interface UsoRepuestoItem {
   id: number
   createdAt: string
@@ -373,6 +374,9 @@ export default function UsosRepuestosPage() {
             Consulta y gestiona las solicitudes de uso de repuestos, separadas en pendientes y completadas.
           </p>
         </div>
+
+       
+      
         <div className="self-start sm:self-auto">
           <Link href="/dashboard/inventario">
             <Button variant="outline" className="text-xs">
@@ -731,6 +735,9 @@ export default function UsosRepuestosPage() {
         </div>
       </div>
 
+     
+
+
       {/* Dialog para completar descripción */}
       <Dialog open={dialogOpen} onOpenChange={(open) => !open ? closeCompletarDialog() : setDialogOpen(true)}>
         <DialogContent className="max-w-lg">
@@ -804,6 +811,10 @@ export default function UsosRepuestosPage() {
         </DialogContent>
       </Dialog>
 
+      
+     
+      
+
       {/* Dialog para información de la máquina */}
       <EquipmentDetailModal
         equipment={selectedMachine as any}
@@ -850,5 +861,7 @@ export default function UsosRepuestosPage() {
         </DialogContent>
       </Dialog>
     </div>
+
+
   )
 }

@@ -38,22 +38,15 @@ const AREAS_PARTES_ALTAS = [
 ] as const;
 
 const AREAS_LOCATIVO = [
-  "Ingreso a Planta",
-  "Envasado Frutos",
-  "Encajado",
-  "Envasado Salsas",
-  "Ingreso Preparación",
+  "Cuarto de máquinas",
   "Preparación",
-  "Materia Prima",
-  "Producto Terminado",
-  "Producción",
-  "Áreas Comunes Producción",
+  "Envasado",
+  "Etiquetado",
+  "Materia prima",
+  "Producto terminado",
   "PTAR",
   "Administración",
-  "Vestier",
-  "Casino",
-  "Servicios de Apoyo",
-  "Lagarde",
+  "Áreas comunes",
   "General / Sin área específica"
 ] as const;
 

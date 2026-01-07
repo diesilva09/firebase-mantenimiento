@@ -1,7 +1,10 @@
 import { User } from 'firebase/auth';
 
+export type AppRole = 'JEFE' | 'TECNICO' | 'NONE';
+
 export interface UserRole {
   isAdmin: boolean;
+  role: AppRole; // Nuevo campo explícito
   permissions: string[];
 }
 
@@ -10,7 +13,12 @@ export interface UserRole {
  */
 export async function checkUserRole(user: User | null): Promise<UserRole> {
   if (!user) {
-    return { isAdmin: false, permissions: [] };
+    return { isAdmin: false, role: 'NONE', permissions: [] };
+  }
+
+  // Si el usuario no ha verificado su correo, no otorgar ningún rol
+  if (!user.emailVerified) {
+    return { isAdmin: false, role: 'NONE', permissions: [] };
   }
 
   try {
@@ -29,27 +37,20 @@ export async function checkUserRole(user: User | null): Promise<UserRole> {
 
     if (response.ok) {
       const data = await response.json();
-      return data;
+      // Aseguramos que la respuesta tenga la estructura correcta
+      return {
+        isAdmin: data.role === 'JEFE',
+        role: data.role || 'NONE',
+        permissions: data.role === 'JEFE' ? ['read', 'write', 'delete', 'admin'] : ['read', 'write']
+      };
     } else {
       // Fallback: verificación basada en variables de entorno
-      const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',')?.map(email => email.trim().toLowerCase()) || [];
-      const isAdmin = user.email ? adminEmails.includes(user.email.toLowerCase()) : false;
-      
-      return {
-        isAdmin,
-        permissions: isAdmin ? ['read', 'write', 'delete', 'admin'] : ['read']
-      };
+      return getFallbackRole(user.email);
     }
   } catch (error) {
     console.error('Error checking user role:', error);
     // Fallback seguro
-    const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',')?.map(email => email.trim().toLowerCase()) || [];
-    const isAdmin = user.email ? adminEmails.includes(user.email.toLowerCase()) : false;
-    
-    return {
-      isAdmin,
-      permissions: isAdmin ? ['read', 'write', 'delete', 'admin'] : ['read']
-    };
+    return getFallbackRole(user.email);
   }
 }
 
@@ -58,4 +59,32 @@ export async function checkUserRole(user: User | null): Promise<UserRole> {
  */
 export function hasPermission(userRole: UserRole, permission: string): boolean {
   return userRole.isAdmin || userRole.permissions.includes(permission);
+}
+
+// Función auxiliar para determinar rol localmente si falla la API
+function getFallbackRole(email: string | null): UserRole {
+  if (!email) return { isAdmin: false, role: 'NONE', permissions: [] };
+  
+  const cleanEmail = email.toLowerCase().trim();
+  const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',')?.map(e => e.trim().toLowerCase()) || [];
+  
+  // LISTA DE TÉCNICOS (Respaldo local - Mantener igual que en auth-server.ts)
+  const techEmails = [
+    "mantenimietot@gmail.com",
+    "mantenimientot@gmail.com",
+  ];
+
+  const isJefe = adminEmails.includes(cleanEmail) || cleanEmail === "mantenimietojefe@gmail.com" || cleanEmail === "mantenimientojefe@gmail.com";
+  const isTecnico = techEmails.includes(cleanEmail);
+
+  if (isJefe) {
+    return { isAdmin: true, role: 'JEFE', permissions: ['read', 'write', 'delete', 'admin'] };
+  }
+  
+  if (isTecnico) {
+    return { isAdmin: false, role: 'TECNICO', permissions: ['read', 'write'] };
+  }
+  
+  // Si no está en ninguna lista, no tiene acceso
+  return { isAdmin: false, role: 'NONE', permissions: [] };
 }

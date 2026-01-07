@@ -26,3 +26,4 @@ export function formatPrice(value: number | null | undefined) {
   if (value === null || value === undefined) return '-'
   return `$${new Intl.NumberFormat('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}`
 }
+

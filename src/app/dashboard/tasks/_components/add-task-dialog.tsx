@@ -486,7 +486,7 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                 name="area"
                 render={({ field }) => (
                   <FormItem className="relative">
-                    <FormLabel>Área/Equipo/zona</FormLabel>
+                    <FormLabel>Área/Linea/Equipo/Zona</FormLabel>
                     <FormControl>
                       <Input
                         placeholder="Escribe el área o nombre del equipo"

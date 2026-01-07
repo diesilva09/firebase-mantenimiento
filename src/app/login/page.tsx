@@ -1,4 +1,3 @@
-
 "use client";
 import { useToast } from "@/hooks/use-toast";
 import { useUser } from "@/firebase/auth/use-user"
@@ -137,7 +136,7 @@ export default function LoginPage() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Correo Electrónico</Label>
-              <Input id="email" type="email" placeholder="usuario@ejemplo.com" {...form.register("email")} />
+              <Input id="email" type="email" placeholder="" {...form.register("email")} />
               {form.formState.errors.email && <p className="text-xs text-destructive">{form.formState.errors.email.message}</p>}
             </div>
             <div className="space-y-2">
@@ -156,3 +155,4 @@ export default function LoginPage() {
     </div>
   );
 }
+

@@ -14,7 +14,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { formatPrice } from '@/lib/utils'
-import { ArrowLeft, Folder, Eye } from "lucide-react"
+import { ArrowLeft, Folder, Eye, Download, FileSpreadsheet, FileText, File } from "lucide-react"
+import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
+import { useUser } from '@/firebase/auth/use-user'
 
 interface HojaVidaRow {
   fecha: string
@@ -185,6 +187,28 @@ useEffect(() => {
     })
   }, [hojaVida, tipoFilter, startDateFilter, endDateFilter])
 
+  const handleExportHojaVida = (format: 'excel' | 'pdf' | 'word') => {
+    const dataToExport = filteredHojaVida.map(row => ({
+      'Fecha': row.fecha,
+      'Descripción': row.descripcion,
+      'Responsable': row.responsable,
+      'Repuestos': row.repuestos,
+      'Tipo': row.tipo,
+      'Observaciones': row.observaciones
+    }));
+
+    const columns = ['Fecha', 'Descripción', 'Responsable', 'Repuestos', 'Tipo', 'Observaciones'];
+    const filename = `Hoja_Vida_${codigo}_${new Date().toISOString().split('T')[0]}`;
+
+    if (format === 'excel') {
+      exportToExcel(dataToExport, filename);
+    } else if (format === 'pdf') {
+      exportToPDF(dataToExport, columns, `Hoja de Vida - Equipo ${codigo}`, filename);
+    } else if (format === 'word') {
+      exportToWord(dataToExport, columns, `Hoja de Vida - Equipo ${codigo}`, filename);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -205,7 +229,28 @@ useEffect(() => {
       </div>
       {view === "hoja-vida" && (
         <div className="space-y-2">
-          <h2 className="text-lg font-medium">Hoja de vida</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-medium">Hoja de vida</h2>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2 h-8 text-xs">
+                  <Download className="h-3.5 w-3.5" />
+                  Exportar
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExportHojaVida('excel')}>
+                  <FileSpreadsheet className="mr-2 h-4 w-4 text-green-600" /> Excel
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExportHojaVida('pdf')}>
+                  <FileText className="mr-2 h-4 w-4 text-red-600" /> PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExportHojaVida('word')}>
+                  <File className="mr-2 h-4 w-4 text-blue-600" /> Word
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
 
           <div className="flex flex-wrap gap-2 text-[11px] sm:text-xs">
             <div className="flex flex-col gap-1">
@@ -482,6 +527,7 @@ interface Repuesto {
 }
 
 function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
+  const { user } = useUser()
   const [repuestos, setRepuestos] = useState<Repuesto[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -554,14 +600,25 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
   }, [codigoEquipo])
 
   useEffect(() => {
-    if (typeof window === "undefined") return
-    try {
-      const flag = localStorage.getItem("isAdmin") === "true"
-      setIsAdmin(flag)
-    } catch {
-      setIsAdmin(false)
+    let mounted = true
+    const checkAdmin = async () => {
+      if (!user) {
+        if (mounted) setIsAdmin(false)
+        return
+      }
+      // Validar contra la variable de entorno pública o API
+      const email = user.email?.toLowerCase().trim()
+      if (email) {
+        const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
+          .split(',')
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean)
+        if (mounted) setIsAdmin(adminEnv.includes(email))
+      }
     }
-  }, [])
+    checkAdmin()
+    return () => { mounted = false }
+  }, [user])
 
   const resetForm = () => {
     setCodigoRepuesto("")

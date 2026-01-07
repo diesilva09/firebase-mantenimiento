@@ -118,8 +118,6 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
     return () => { mounted = false; };
   }, [user]);
 
-  console.log('USER EMAIL EN TASKS:', userEmail, 'isAdmin:', isAdmin);
-
   useEffect(() => {
     if (!userEmail) return;
     const loadAllTasks = async () => {
