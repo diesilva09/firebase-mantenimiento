@@ -17,12 +17,10 @@ export async function POST(req: Request) {
     const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',')?.map(e => e.trim().toLowerCase()) || [];
     const cleanEmail = email.toLowerCase();
     
-    const isJefe = adminEmails.includes(cleanEmail) || 
-                   cleanEmail === "mantenimietojefe@gmail.com" || 
-                   cleanEmail === "mantenimientojefe@gmail.com";
-                   
-    const isTecnico = cleanEmail === "mantenimietot@gmail.com" || 
-                      cleanEmail === "mantenimientot@gmail.com";
+    const techEmails = process.env.TECNICO_EMAILS?.split(',')?.map(e => e.trim().toLowerCase()) || [];
+
+    const isJefe = adminEmails.includes(cleanEmail);
+    const isTecnico = techEmails.includes(cleanEmail);
     
     // Aquí puedes implementar lógica más compleja como verificar en una tabla de usuarios
     // const userQuery = await query('SELECT role FROM usuarios WHERE email = $1', [email]);

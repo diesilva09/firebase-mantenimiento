@@ -153,7 +153,7 @@ export function ConsumptionForm() {
                 <FormControl>
                   <Input 
                     type="number" 
-                    placeholder="Ej: 1500" 
+                    placeholder="" 
                     value={field.value === 0 ? '' : field.value}
                     onChange={(e) => {
                       const value = e.target.value;
@@ -189,7 +189,7 @@ export function ConsumptionForm() {
                 <FormControl>
                   <Input 
                     type="number" 
-                    placeholder="Ej: 120" 
+                    placeholder="" 
                     value={field.value === 0 ? '' : field.value}
                     onChange={(e) => {
                       const value = e.target.value;
@@ -225,7 +225,7 @@ export function ConsumptionForm() {
                 <FormControl>
                   <Input 
                     type="number" 
-                    placeholder="Ej: 25.5" 
+                    placeholder="" 
                     value={field.value === 0 ? '' : field.value}
                     onChange={(e) => {
                       const value = e.target.value;
@@ -266,7 +266,7 @@ export function ConsumptionForm() {
                   <FormControl>
                     <Input 
                       type="number" 
-                      placeholder="Ej: 10" 
+                      placeholder="" 
                       value={field.value === 0 ? '' : field.value}
                       onChange={(e) => {
                         const value = e.target.value;
@@ -302,7 +302,7 @@ export function ConsumptionForm() {
                   <FormControl>
                     <Input 
                       type="number" 
-                      placeholder="Ej: 12" 
+                      placeholder="" 
                       value={field.value === 0 ? '' : field.value}
                       onChange={(e) => {
                         const value = e.target.value;
@@ -344,7 +344,7 @@ export function ConsumptionForm() {
                   <FormControl>
                     <Input 
                       type="number" 
-                      placeholder="Ej: 8" 
+                      placeholder="" 
                       value={field.value === 0 ? '' : field.value}
                       onChange={(e) => {
                         const value = e.target.value;
@@ -380,7 +380,7 @@ export function ConsumptionForm() {
                   <FormControl>
                     <Input 
                       type="number" 
-                      placeholder="Ej: 7" 
+                      placeholder="" 
                       value={field.value === 0 ? '' : field.value}
                       onChange={(e) => {
                         const value = e.target.value;
@@ -422,7 +422,7 @@ export function ConsumptionForm() {
                   <FormControl>
                     <Input 
                       type="number" 
-                      placeholder="Ej: 5" 
+                      placeholder="" 
                       value={field.value === 0 ? '' : field.value}
                       onChange={(e) => {
                         const value = e.target.value;
@@ -458,7 +458,7 @@ export function ConsumptionForm() {
                   <FormControl>
                     <Input 
                       type="number" 
-                      placeholder="Ej: 6" 
+                      placeholder="" 
                       value={field.value === 0 ? '' : field.value}
                       onChange={(e) => {
                         const value = e.target.value;
@@ -500,7 +500,7 @@ export function ConsumptionForm() {
                   <FormControl>
                     <Input 
                       type="number" 
-                      placeholder="Ej: 9" 
+                      placeholder="" 
                       value={field.value === 0 ? '' : field.value}
                       onChange={(e) => {
                         const value = e.target.value;
@@ -536,7 +536,7 @@ export function ConsumptionForm() {
                   <FormControl>
                     <Input 
                       type="number" 
-                      placeholder="Ej: 11" 
+                      placeholder="" 
                       value={field.value === 0 ? '' : field.value}
                       onChange={(e) => {
                         const value = e.target.value;

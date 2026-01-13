@@ -12,7 +12,8 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import type { Task } from "@/lib/types"
-import { formatDate } from "@/lib/utils"
+import { format } from "date-fns"
+import { es } from "date-fns/locale"
 import Image from "next/image"
 import { Edit } from "lucide-react"
 
@@ -87,12 +88,12 @@ export function TaskDetailsDialog({
             )}
             <div className="flex justify-between">
                 <span className="text-muted-foreground">Próx. Ejecución:</span>
-                <span className="font-medium">{formatDate(task.nextExecution)}</span>
+                <span className="font-medium">{format(new Date(task.nextExecution), "PPP", { locale: es })}</span>
             </div>
              {task.status === 'Completada' && task.completionDate && (
                 <div className="flex justify-between">
                     <span className="text-muted-foreground">Fecha Completada:</span>
-                    <span className="font-medium">{formatDate(task.completionDate)}</span>
+                    <span className="font-medium">{format(new Date(task.completionDate), "PPP", { locale: es })}</span>
                 </div>
             )}
             {task.status === 'Completada' && task.workDone && (

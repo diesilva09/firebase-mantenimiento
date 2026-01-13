@@ -25,6 +25,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useDashboardSearch, SearchSuggestion } from "@/context/dashboard-search-context";
 
 const AREAS_PARTES_ALTAS = [
   "Planta (Primer Piso)",
@@ -65,6 +66,7 @@ export function ZonasPageClient() {
   const router = useRouter();
   const selectedZonaCodigoFromQuery = searchParams.get("selectedZonaCodigo") || null;
 
+  const { setSuggestions } = useDashboardSearch();
   const [tipo, setTipo] = useState<ZonaTipo>("PARTES_ALTAS");
   const [area, setArea] = useState<string | null>(null);
 
@@ -100,7 +102,7 @@ export function ZonasPageClient() {
         setLoadingZonas(true);
 
         // Cargar TODAS las zonas para poder validar códigos duplicados globalmente
-        const res = await fetch(`/api/zonas`);
+        const res = await fetch(`/api/zonas`, { cache: 'no-store' });
         if (!res.ok) {
           console.warn("Error cargando zonas");
           setZonas([]);
@@ -120,6 +122,17 @@ export function ZonasPageClient() {
 
     fetchZonas();
   }, []); // Se ejecuta solo al montar el componente
+
+  // Registrar sugerencias globales para zonas
+  useEffect(() => {
+    const items: SearchSuggestion[] = zonas.map((z) => ({
+      id: z.id,
+      label: `${z.codigo ? z.codigo + ' - ' : ''}${z.nombre} (${z.area || 'Sin área'})`,
+      type: 'zona',
+      route: `/dashboard/zonas?selectedZonaCodigo=${encodeURIComponent(z.codigo || z.id)}`,
+    }));
+    setSuggestions(items);
+  }, [zonas, setSuggestions]);
 
   useEffect(() => {
     let mounted = true;

@@ -129,7 +129,7 @@ export function useEquipos() {
           rpm: equipoData.rpm,
           magnitudMedida: equipoData.magnitudMedida,
           estado: equipoData.estado ?? 'Operativo',
-          imagenUrl: imageDataUrl ?? null,
+          imagen_url: imageDataUrl ?? null,
           attachmentsUrl: equipoData.attachmentsUrl ?? null,
         }),
       })

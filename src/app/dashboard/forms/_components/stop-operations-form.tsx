@@ -243,7 +243,7 @@ export function StopOperationsForm() {
             <FormItem>
               <FormLabel>Referencia</FormLabel>
               <FormControl>
-                <Input placeholder="Ej: PAR-2025-001" {...field} />
+                <Input placeholder="" {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -365,7 +365,7 @@ export function StopOperationsForm() {
             <FormItem>
               <FormLabel>Motivo de la Parada</FormLabel>
               <FormControl>
-                <Textarea placeholder="Falla eléctrica, cambio de molde, falta de material..." {...field} />
+                <Textarea placeholder="" {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -378,7 +378,7 @@ export function StopOperationsForm() {
             <FormItem>
               <FormLabel>Impacto en Producción (Opcional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="Unidades no producidas, retraso en entrega..." {...field} />
+                <Textarea placeholder="" {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>

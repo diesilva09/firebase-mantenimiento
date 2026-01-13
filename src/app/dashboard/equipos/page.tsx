@@ -27,8 +27,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Download, FileSpreadsheet, FileText, File } from "lucide-react"
+import { Download, FileSpreadsheet, FileText, File, X, Maximize2 } from "lucide-react"
 import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
+
+
+
 
 const equipmentSchema = z.object({
   codigo: z.string().min(1, "El código es requerido").max(50, "El código es muy largo"),
@@ -90,6 +93,9 @@ export default function EquiposPage() {
   const [checkingAdmin, setCheckingAdmin] = useState(true)
 
   const { equipos, loading: equiposLoading, createEquipo, updateEquipo, deleteEquipo } = useEquipos()
+  
+  
+
 
   // Manejo de errores
   const [error, setError] = useState<string | null>(null)
@@ -448,6 +454,7 @@ export default function EquiposPage() {
   const menuRef = useRef<HTMLDivElement | null>(null)
   // Estado para rastrear la carga de anexos
   const [loadingAnexos, setLoadingAnexos] = useState<string | null>(null)
+  const [isImageExpanded, setIsImageExpanded] = useState(false)
 
   const modalEquipment = modalEquipmentCode
     ? equipos.find((e) => e.codigo === modalEquipmentCode)
@@ -695,6 +702,8 @@ export default function EquiposPage() {
     
     }));
 
+    
+
     const columns = ['Código', 'Nombre', 'Área', 'Línea', 'Marca', 'Modelo', 'Estado'];
     const filename = `Inventario_Equipos_${new Date().toISOString().split('T')[0]}`;
 
@@ -932,40 +941,69 @@ export default function EquiposPage() {
                         <FormMessage />
                       </FormItem>
                     )}
-
+              
+              
                     <FormItem>
                       <FormLabel>Imagen del equipo</FormLabel>
+                      
                       <FormControl>
-                        <Input
-                          type="file"
-                          accept="image/*"
-                          {...form.register("image", {
-                            validate: (value) => {
-                              if (value && value[0]) {
-                                const file = value[0];
+                        <div className="space-y-3">
+                          <Input
+                            type="file"
+                            accept="image/*"
+                            {...form.register("image", {
+                              validate: (value) => {
+                                if (value && value[0]) {
+                                  const file = value[0];
 
-                                // Validar tamaño (máximo 5MB)
-                                if (file.size > 5 * 1024 * 1024) {
-                                  return "La imagen debe ser menor a 5MB";
-                                }
+                                  // Validar tamaño (máximo 5MB)
+                                  if (file.size > 5 * 1024 * 1024) {
+                                    return "La imagen debe ser menor a 5MB";
+                                  }
 
-                                // Validar tipo
-                                if (!file.type.startsWith('image/')) {
-                                  return "Por favor seleccione un archivo de imagen válido";
+                                  // Validar tipo
+                                  if (!file.type.startsWith('image/')) {
+                                    return "Por favor seleccione un archivo de imagen válido";
+                                  }
                                 }
+                                return true;
                               }
-                              return true;
-                            }
-                          })}
-                        />
+                            })}
+                          />
+                          
+                          {imagePreview && (
+                            <div className="relative group w-fit">
+                              <div 
+                                className="relative h-24 w-24 overflow-hidden rounded-md border cursor-pointer"
+                                onClick={() => setIsImageExpanded(true)}
+                              >
+                                <img 
+                                  src={imagePreview} 
+                                  alt="Preview" 
+                                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" 
+                                />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <Maximize2 className="h-5 w-5 text-white" />
+                                </div>
+                              </div>
+                              
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  form.resetField("image")
+                                }}
+                                className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/90"
+                                title="Eliminar imagen"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </FormControl>
                       <FormMessage />
-
-                      {imagePreview && (
-                        <div className="mt-2">
-                          <img src={imagePreview} alt="preview" className="h-24 w-24 object-cover rounded-md border" />
-                        </div>
-                      )}
                     </FormItem>
 
                     <FormItem>
@@ -1139,8 +1177,8 @@ export default function EquiposPage() {
                         // Si estamos buscando un equipo específico que no tiene línea, también debe aparecer
                         if (highlightedCodigo && e.codigo === highlightedCodigo && !eqLine) return true
 
-                        // Aceptar coincidencia exacta o que la linea contenga el texto seleccionado
-                        return eqLine === lineKey || eqLine.includes(lineKey)
+                        // Aceptar coincidencia exacta (includes causaba conflicto entre "6 Boquillas" y "16 Boquillas")
+                        return eqLine === lineKey
                       })
                     : filteredByAdvancedFilters
                   : filteredByAdvancedFilters
@@ -1303,7 +1341,7 @@ export default function EquiposPage() {
                                                 fabricante: e.fabricante ?? null,
                                                 fechaAdquisicion: e.fechaAdquisicion ?? null,
                                                 image: undefined,
-                                                area: e.area ?? "",
+                                                area: (e.area as any) ?? "",
                                                 linea: e.linea ?? null,
                                                 capacidad: e.capacidad ?? null,
                                                 amperaje: e.amperaje ?? null,
@@ -1323,7 +1361,7 @@ export default function EquiposPage() {
                                             className="block w-full px-3 py-1.5 text-left text-red-600 hover:bg-accent/60"
                                             onClick={(ev) => {
                                               ev.stopPropagation()
-                                              setDeleteTarget(e)
+                                                setDeleteTarget(e as any)
                                             }}
                                           >
                                             Eliminar equipo
@@ -1436,6 +1474,23 @@ export default function EquiposPage() {
         onClose={() => setModalEquipmentCode(null)}
         isLoading={!!modalEquipmentCode && equiposLoading}
       /> 
+
+      <Dialog open={isImageExpanded} onOpenChange={setIsImageExpanded}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Vista previa de imagen</DialogTitle>
+          </DialogHeader>
+          <div className="flex justify-center items-center">
+            {imagePreview && (
+              <img 
+                src={imagePreview} 
+                alt="Vista ampliada" 
+                className="max-h-[70vh] w-auto object-contain rounded-md" 
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {isAdmin && deleteTarget && (
         <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>

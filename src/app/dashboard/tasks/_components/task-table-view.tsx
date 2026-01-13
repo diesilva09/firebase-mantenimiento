@@ -23,7 +23,8 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import type { Task, TaskStatus, Schedule, User } from "@/lib/types"
-import { formatDate } from "@/lib/utils"
+import { format } from "date-fns"
+import { es } from "date-fns/locale"
 import {
   Accordion,
   AccordionContent,
@@ -153,11 +154,11 @@ function TaskTable({
                       <div className="flex flex-wrap gap-x-4 gap-y-1">
                         <span>
                           <span className="font-medium">Fecha ejec.:</span>{" "}
-                          {task.completionDate ? formatDate(task.completionDate) : '-'}
+                          {task.completionDate ? format(new Date(task.completionDate), "PPP", { locale: es }) : '-'}
                         </span>
                         <span>
                           <span className="font-medium">Próx. ejec.:</span>{" "}
-                          {formatDate(task.nextExecution)}
+                          {format(new Date(task.nextExecution), "PPP", { locale: es })}
                         </span>
                       </div>
                     </div>
@@ -179,12 +180,12 @@ function TaskTable({
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
                       {task.completionDate ? (
-                        formatDate(task.completionDate)
+                        format(new Date(task.completionDate), "PPP", { locale: es })
                       ) : (
                         <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
-                    <TableCell className="hidden md:table-cell">{formatDate(task.nextExecution)}</TableCell>
+                    <TableCell className="hidden md:table-cell">{format(new Date(task.nextExecution), "PPP", { locale: es })}</TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>

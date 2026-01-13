@@ -80,7 +80,12 @@ export default function InventarioPage() {
       ? user.email.toLowerCase().trim()
       : null
 
-    const isBoss = normalizedEmail === "mantenimietojefe@gmail.com"
+    const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+
+    const isBoss = normalizedEmail ? adminEnv.includes(normalizedEmail) : false
     setIsAdmin(isBoss)
   }, [user])
 

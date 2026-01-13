@@ -104,8 +104,8 @@ export function MaintenanceOrderForm() {
   useEffect(() => {
     const fetchZonas = async () => {
       try {
-        const res = await fetch("/api/zonas");
-        if (!res.ok) return;
+        const res = await fetch("/api/zonas", { cache: 'no-store' });
+        if (!res.ok) throw new Error("Failed to fetch");
         const json = await res.json().catch(() => ({}));
         const data = Array.isArray(json?.data) ? json.data : [];
         const mapped: ZonaLookup[] = data.map((z: any) => ({
@@ -115,8 +115,18 @@ export function MaintenanceOrderForm() {
           tipo: z.tipo ?? "",
         }));
         setZonas(mapped);
+        
+        if (typeof window !== "undefined") {
+          localStorage.setItem("zonas", JSON.stringify(mapped));
+        }
       } catch (e) {
         console.warn("No se pudo cargar la lista de zonas", e);
+        try {
+          const raw = typeof window !== "undefined" ? localStorage.getItem("zonas") : null;
+          if (raw) setZonas(JSON.parse(raw));
+        } catch (localError) {
+          console.warn("Fallback localStorage zonas failed", localError);
+        }
       }
     };
 
@@ -135,7 +145,7 @@ export function MaintenanceOrderForm() {
 
   const filteredZonas = useMemo(() => {
     const q = zonaQuery.trim().toLowerCase();
-    if (!q) return [];
+    if (!q) return zonas.slice(0, 10);
     return zonas
       .filter((z) =>
         (z.area ?? "").toLowerCase().includes(q) ||
@@ -310,8 +320,25 @@ export function MaintenanceOrderForm() {
           name="zona"
           render={({ field }) => (
             <FormItem className="relative">
-             
-             
+              <FormLabel>Zona</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder="Escribe la zona o área"
+                  value={zonaQuery}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setZonaQuery(v)
+                    field.onChange(v)
+                    setShowZonaSuggestions(true)
+                  }}
+                  onFocus={() => {
+                    setShowZonaSuggestions(true)
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setShowZonaSuggestions(false), 150)
+                  }}
+                />
+              </FormControl>
               {showZonaSuggestions && filteredZonas.length > 0 && (
                 <div className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-popover text-xs shadow-md">
                   {filteredZonas.map((z) => (

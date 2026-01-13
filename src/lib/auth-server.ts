@@ -12,14 +12,11 @@ const adminConfigured = Boolean(
 const ROLE_ASSIGNMENTS = {
   JEFE: [
     ...(process.env.NEXT_PUBLIC_ADMIN_EMAILS || "").split(",").map(s => s.trim().toLowerCase()),
-    // Puedes agregar más correos fijos aquí si prefieres no usar variables de entorno
-    "mantenimietojefe@gmail.com",
-    "mantenimientojefe@gmail.com",
-  ],
+  ].filter(Boolean),
   TECNICO: [
-    // Lista de correos de técnicos
-    "mantenimietot@gmail.com",
-  ]
+    // Se recomienda agregar una variable de entorno para técnicos también: process.env.TECNICO_EMAILS
+    ...(process.env.TECNICO_EMAILS || "").split(",").map(s => s.trim().toLowerCase()),
+  ].filter(Boolean)
 }
 
 export async function requireAdminFromRequest(req: Request) {
@@ -44,9 +41,7 @@ export async function requireAdminFromRequest(req: Request) {
     const email = decoded.email?.toLowerCase().trim()
 
     // Validar que el email haya sido verificado por el usuario (clic en el link de Firebase)
-    // EXCEPCIÓN: Permitir entrar a los jefes principales sin verificar
-    const isMainJefe = email === "mantenimietojefe@gmail.com" || email === "mantenimientojefe@gmail.com"
-    if (!decoded.email_verified && !isMainJefe) {
+    if (!decoded.email_verified) {
       return { ok: false, status: 403, message: "Debes verificar tu correo electrónico para acceder." }
     }
 

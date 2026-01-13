@@ -152,7 +152,7 @@ export function EquipmentInspectionForm() {
               <FormLabel>Nombre del Equipo</FormLabel>
               <FormControl>
                 <Input
-                  placeholder="Ej: Torno CNC-01"
+                  placeholder=""
                   value={equipoQuery}
                   onChange={(e) => {
                     const v = e.target.value
@@ -276,7 +276,7 @@ export function EquipmentInspectionForm() {
             <FormItem>
               <FormLabel>Observaciones</FormLabel>
               <FormControl>
-                <Textarea placeholder="Detalle cualquier hallazgo o anomalía..." {...field} />
+                <Textarea placeholder="" {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>

@@ -154,7 +154,6 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
           avatarUrl: selectedUser.avatarUrl || `https://picsum.photos/seed/${encodeURIComponent(selectedUser.name)}/40/40`,
         };
       } else {
-        // Fallback para usuarios hardcoded si no están en la lista users
         const techNameMap: Record<string, string> = {
           "luis-bohorquez": "Luis Bohorquez",
           "duvan-guevara": "Duvan Guevara",
@@ -163,9 +162,7 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
           "javier-morales": "Javier Morales",
         };
         const name = techNameMap[data.executedById];
-        
         if (!name) return;
-
         executedByUser = {
           id: data.executedById,
           name,
@@ -226,9 +223,6 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
                         <SelectItem value="juan-david-caro">Juan David Caro</SelectItem>
                         <SelectItem value="sergio-rubiano">Sergio Rubiano</SelectItem>
                         <SelectItem value="javier-morales">Javier Morales</SelectItem>
-                        {users.map((user) => (
-                          <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
-                        ))}
                         <SelectItem value="otro">Otro técnico</SelectItem>
                        </SelectContent>
                     </Select>

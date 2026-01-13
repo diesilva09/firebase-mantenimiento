@@ -107,7 +107,7 @@ export function SparesRequestForm() {
             <FormItem>
               <FormLabel>Repuesto Requerido</FormLabel>
               <FormControl>
-                <Textarea placeholder="Ej: Filtro de aceite 10 micras" {...field} />
+                <Textarea placeholder="" {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -139,7 +139,7 @@ export function SparesRequestForm() {
               <FormLabel>Máquina que requiere el repuesto</FormLabel>
               <FormControl>
                 <Input
-                  placeholder="Ej: Compresor Atlas Copco"
+                  placeholder=""
                   value={maquinaQuery}
                   onChange={(e) => {
                     const v = e.target.value
@@ -197,7 +197,7 @@ export function SparesRequestForm() {
             <FormItem>
               <FormLabel>Locativo destino</FormLabel>
               <FormControl>
-                <Input placeholder="Ej: Taller de mantenimiento, Línea 2" {...field} />
+                <Input placeholder="" {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>

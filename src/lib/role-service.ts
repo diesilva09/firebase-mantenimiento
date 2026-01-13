@@ -68,13 +68,9 @@ function getFallbackRole(email: string | null): UserRole {
   const cleanEmail = email.toLowerCase().trim();
   const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',')?.map(e => e.trim().toLowerCase()) || [];
   
-  // LISTA DE TÉCNICOS (Respaldo local - Mantener igual que en auth-server.ts)
-  const techEmails = [
-    "mantenimietot@gmail.com",
-    "mantenimientot@gmail.com",
-  ];
+  const techEmails = process.env.TECNICO_EMAILS?.split(',')?.map(e => e.trim().toLowerCase()) || [];
 
-  const isJefe = adminEmails.includes(cleanEmail) || cleanEmail === "mantenimietojefe@gmail.com" || cleanEmail === "mantenimientojefe@gmail.com";
+  const isJefe = adminEmails.includes(cleanEmail);
   const isTecnico = techEmails.includes(cleanEmail);
 
   if (isJefe) {

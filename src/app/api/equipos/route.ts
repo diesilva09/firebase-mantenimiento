@@ -20,7 +20,7 @@ const equipoSchema = z.object({
   rpm: z.string().optional().nullable(),
   magnitud_medida: z.string().optional().nullable(),
   estado: z.string().optional().nullable(),
-  imagen_url: z.string().optional().nullable(),
+  imagen_url: z.string().url().optional().nullable(),
   attachments_url: z.string().optional().nullable(),
 })
 
@@ -37,7 +37,10 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const data = equipoSchema.parse(body)
+  
+
+
+    const data = equipoSchema.partial().parse(body)
     const { rows } = await query(
       `INSERT INTO equipos (
         codigo, version, nombre, area, linea, marca, modelo, fabricante,

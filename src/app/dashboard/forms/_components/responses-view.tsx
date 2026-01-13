@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { MoreHorizontal, Search, RefreshCw } from "lucide-react"
+import { MoreHorizontal, Search, RefreshCw, FileSpreadsheet, FileText, File, Download } from "lucide-react"
 import type { Submission, FormMetadata } from "@/lib/types"
 import { formatDate } from "@/lib/utils"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -27,6 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getAllSubmissions, getFormsMetadata } from '@/lib/submissions-service'
 import { useEquipos } from '@/hooks/use-equipos'
 import { EquipmentDetailModal, type EquipmentDetail } from "@/components/equipment-detail-modal"
+import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
 
 interface ResponsesViewProps {
   submissions?: Submission[]; // Hacer opcional para poder usar sin props
@@ -115,6 +116,61 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
     setIsEquipmentModalOpen(true)
   }
 
+  const handleExport = (submission: Submission, format: 'excel' | 'pdf' | 'word') => {
+    const flatData = {
+      'Formulario': submission.formTitle,
+      'Fecha': formatDate(submission.submittedAt),
+      ...Object.entries(submission.data).reduce((acc, [key, value]) => {
+        acc[key] = typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value ?? '');
+        return acc;
+      }, {} as Record<string, string>)
+    };
+
+    const dataToExport = [flatData];
+    const columns = Object.keys(flatData);
+    const filename = `Respuesta_${submission.formTitle.replace(/\s+/g, '_')}_${new Date().getTime()}`;
+
+    if (format === 'excel') {
+      exportToExcel(dataToExport, filename);
+    } else if (format === 'pdf') {
+      exportToPDF(dataToExport, columns, `Respuesta: ${submission.formTitle}`, filename);
+    } else if (format === 'word') {
+      exportToWord(dataToExport, columns, `Respuesta: ${submission.formTitle}`, filename);
+    }
+  };
+
+  const handleBulkExport = (format: 'excel' | 'pdf' | 'word') => {
+    if (filteredSubmissions.length === 0) return;
+
+    const dataToExport = filteredSubmissions.map(submission => {
+      const row: Record<string, string> = {
+        'Formulario': submission.formTitle,
+        'Fecha': formatDate(submission.submittedAt),
+      };
+
+      Object.entries(submission.data).forEach(([key, value]) => {
+        row[key] = typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value ?? '');
+      });
+      
+      return row;
+    });
+
+    const allKeys = new Set<string>(['Formulario', 'Fecha']);
+    dataToExport.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
+    const columns = Array.from(allKeys);
+
+    const formTitle = selectedForm === 'all' ? 'Todas las Respuestas' : forms.find(f => f.slug === selectedForm)?.title || 'Respuestas';
+    const filename = `Reporte_${formTitle.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`;
+
+    if (format === 'excel') {
+      exportToExcel(dataToExport, filename);
+    } else if (format === 'pdf') {
+      exportToPDF(dataToExport, columns, `Reporte: ${formTitle}`, filename);
+    } else if (format === 'word') {
+      exportToWord(dataToExport, columns, `Reporte: ${formTitle}`, filename);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-64">
@@ -157,6 +213,25 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
                     ))}
                   </SelectContent>
                 </Select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="gap-2">
+                      <Download className="h-4 w-4" />
+                      <span className="hidden sm:inline">Exportar Lista</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleBulkExport('excel')}>
+                      <FileSpreadsheet className="mr-2 h-4 w-4 text-green-600" /> Excel
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleBulkExport('pdf')}>
+                      <FileText className="mr-2 h-4 w-4 text-red-600" /> PDF
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleBulkExport('word')}>
+                      <File className="mr-2 h-4 w-4 text-blue-600" /> Word
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
             </div>
             <div className="rounded-md border">
               <Table>
@@ -192,7 +267,15 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
                           <DropdownMenuContent align="end">
                             <DropdownMenuLabel>Acciones</DropdownMenuLabel>
                             <DropdownMenuItem onSelect={() => handleViewDetails(submission)}>Ver Detalles</DropdownMenuItem>
-                            <DropdownMenuItem>Exportar</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleExport(submission, 'excel')}>
+                              <FileSpreadsheet className="mr-2 h-4 w-4 text-green-600" /> Excel
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleExport(submission, 'pdf')}>
+                              <FileText className="mr-2 h-4 w-4 text-red-600" /> PDF
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleExport(submission, 'word')}>
+                              <File className="mr-2 h-4 w-4 text-blue-600" /> Word
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
