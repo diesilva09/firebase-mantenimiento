@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Calendar, List, RefreshCw } from 'lucide-react';
+import { Calendar, List, RefreshCw, BarChart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useRouter, useSearchParams } from "next/navigation";
@@ -11,6 +11,7 @@ import { AddTaskDialog } from './add-task-dialog';
 import { EditTaskDialog } from './edit-task-dialog';
 import { TaskCalendarView } from './task-calendar-view';
 import { TaskTableView } from './task-table-view';
+import { TaskAnalytics } from './task-analytics';
 import { TaskDetailsDialog } from './task-details-dialog';
 import { CompleteTaskDialog } from './complete-task-dialog';
 import { EquipmentInfoDialog } from './equipment-info-dialog';
@@ -22,7 +23,7 @@ import { useUser } from '@/firebase/auth/use-user';
 import { useNotificationsContext as useNotifications } from '@/context/notifications-context';
 import { useDashboardSearch, SearchSuggestion } from '@/context/dashboard-search-context';
 
-type ViewMode = 'calendar' | 'table';
+type ViewMode = 'calendar' | 'table' | 'analytics';
 const schedules: Schedule[] = ['Partes Altas', 'Equipo de Medición', 'Mantenimiento Locativo', 'Maquinaria'];
 
 interface TasksPageClientProps {
@@ -434,7 +435,7 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         const completionIso = new Date().toISOString();
         setTasks(prev => prev.map(task =>
           task.id === taskId
-            ? { ...task, status: 'Completada', workDone, executedBy, completionDate: completionIso, imageUrlBefore, imageUrlAfter }
+            ? { ...task, status: 'Completada', workDone, executedBy, completionDate: completionIso, imageUrlBefore, imageUrlAfter, maintenanceType: tipoMantenimiento }
             : task
         ));
 
@@ -477,6 +478,8 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
                 ref_task_id: taskId,
               }),
             });
+
+            
             if (resNotif.ok) {
               const jsonNotif = await resNotif.json();
               const saved = jsonNotif.data;
@@ -643,6 +646,9 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
             <ToggleGroupItem value="table" aria-label="Vista de tabla">
               <List className="h-4 w-4" />
             </ToggleGroupItem>
+            <ToggleGroupItem value="analytics" aria-label="Vista de estadísticas">
+              <BarChart className="h-4 w-4" />
+            </ToggleGroupItem>
           </ToggleGroup>
           <Button variant="outline" onClick={() => loadTasks(selectedSchedule)} disabled={isLoading} className="flex-1 md:flex-none">
             <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
@@ -681,6 +687,8 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
             </Tabs>
           </CardContent>
         </Card>
+      ) : viewMode === 'analytics' ? (
+        <TaskAnalytics tasks={visibleTasks} />
       ) : (
         <TaskTableView
           tasks={sortedTasks}

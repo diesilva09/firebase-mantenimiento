@@ -471,6 +471,9 @@ export default function EquiposPage() {
       const file = fileList[0];
       objectUrl = URL.createObjectURL(file);
       setImagePreview(objectUrl);
+    } else if (editingId) {
+      const currentEquipment = equipos.find((e) => e.id === editingId)
+      setImagePreview(currentEquipment?.imageDataUrl ?? null)
     } else {
       setImagePreview(null);
     }
@@ -480,7 +483,7 @@ export default function EquiposPage() {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [imageFile]);
+  }, [imageFile, editingId, equipos]);
 
 
   const watchedArea = form.watch("area")

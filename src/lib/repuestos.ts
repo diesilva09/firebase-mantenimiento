@@ -33,14 +33,15 @@ export type RepuestoItem = RepuestoForm & {
 export const CATEGORIAS = ['Mecanico', 'Neumatico', 'Electrico', 'Otro'] as const
 
 export const CATEGORIA_LABELS: Record<(typeof CATEGORIAS)[number], string> = {
-  Mecanico: 'Mecánico',
+  Mecanico: 'Mecanica',
   Neumatico: 'Neumático',
   Electrico: 'Eléctrico',
   Otro: 'Otro',
 }
 
 export const CATEGORIA_SUBCATEGORIAS: Record<string, string[]> = {
-  Mecanico: ['Rodamientos', 'Correas', 'Engranes', 'Estructuras'],
-  Neumatico: ['Válvulas', 'Cilindros', 'Racores', 'Mangueras'],
-  Electrico: ['Sensores', 'Motores', 'Contactores', 'Interruptores', 'Cableado'],
+  Mecanico: ['', '', '', ''],
+  Neumatico: ['', '', '', ''],
+  Electrico: ['', '', '', '', ''],
 }
+

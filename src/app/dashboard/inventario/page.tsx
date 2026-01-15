@@ -20,11 +20,15 @@ import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Eye, MoreHorizontal, Download, FileSpreadsheet, FileText, File } from "lucide-react"
+import { Eye, MoreHorizontal, Download, FileSpreadsheet, FileText, File, X, Maximize2 } from "lucide-react"
 import { initializeFirebase } from "@/firebase"
-import { useNotificationsContext as useNotifications } from "@/context/notifications-context"
-import { EquipmentDetailModal } from "@/components/equipment-detail-modal"
-import type { Notification } from "@/lib/types"
+
+// Export libraries
+import * as XLSX from "xlsx"
+import jsPDF from "jspdf"
+import "jspdf-autotable"
+import { Document, Packer, Paragraph, Table, TableCell, TableRow, WidthType, TextRun } from "docx"
+import { saveAs } from "file-saver"
 
 
 // helper
@@ -43,7 +47,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { formatPrice } from '@/lib/utils'
-import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
 import { repuestoSchema, RepuestoForm, RepuestoItem, CATEGORIAS, CATEGORIA_LABELS, CATEGORIA_SUBCATEGORIAS } from '@/lib/repuestos'
 
 // helper
@@ -65,7 +68,7 @@ export default function InventarioPage() {
   const [isAdmin, setIsAdmin] = useState(false)
 
   const [repuestos, setRepuestos] = useState<RepuestoItem[]>([])
-  const [loadingRepuestos, setLoadingRepuestos] = useState(true)
+  const [loadingRepuestos, setLoadingRepuestos] = useState(false)
   const [errorRepuestos, setErrorRepuestos] = useState<string | null>(null)
   const [expandedCategoria, setExpandedCategoria] = useState<string | null>(null)
   const [subcategoriaFilters, setSubcategoriaFilters] = useState<Record<string, string>>({})
@@ -80,12 +83,7 @@ export default function InventarioPage() {
       ? user.email.toLowerCase().trim()
       : null
 
-    const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean)
-
-    const isBoss = normalizedEmail ? adminEnv.includes(normalizedEmail) : false
+    const isBoss = normalizedEmail === "mantenimietojefe@gmail.com"
     setIsAdmin(isBoss)
   }, [user])
 
@@ -114,11 +112,9 @@ export default function InventarioPage() {
   const [usoDescripcion, setUsoDescripcion] = useState("")
   const [usoMaquinaSeleccionada, setUsoMaquinaSeleccionada] = useState<any | null>(null)
   const { toast } = useToast()
-  const { equipos, loading: equiposLoading } = useEquipos()
+  const { equipos } = useEquipos()
   const [usoMaquinaFocused, setUsoMaquinaFocused] = useState(false)
   const { suggestions, highlightedSuggestionId, setQuery, setSuggestions, setHighlightedSuggestionId } = useDashboardSearch()
-  const { permission, requestPermission, refreshNotifications } = useNotifications()
-  const [machineDetailCode, setMachineDetailCode] = useState<string | null>(null)
 
   // Si la página fue recargada (reload), limpiamos la búsqueda global para no mantener
   // la sugerencia resaltada ni el texto de búsqueda.
@@ -209,6 +205,10 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
       if (!sub) return true
       return (r.subcategoria || "") === sub
     })
+  }
+
+  function getCategoriaTotalValue(cat: string) {
+    return getRepuestosByCategoria(cat).reduce((acc, r) => acc + ((r.precio || 0) * (r.stockActual || 0)), 0)
   }
 
   function toggleCategoria(cat: string) {
@@ -415,18 +415,74 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
       stockMaximo: 0,
       stockMinimo: 0,
       stockActual: 0,
-      ubicacion: "",
-      marca: "",
-      modelo: "",
-      notas: "",
       imagen: undefined,
     },
   })
 
+  const watchedCodigo = form.watch("codigo")
+
+  // Validar código duplicado en tiempo real
+  useEffect(() => {
+    if (!watchedCodigo) {
+      form.clearErrors("codigo")
+      return
+    }
+
+    const isDuplicate = repuestos.some(
+      (r) =>
+        r.codigo.toLowerCase().trim() === watchedCodigo.toLowerCase().trim() &&
+        r.id !== editingId
+    )
+
+    if (isDuplicate) {
+      form.setError("codigo", {
+        type: "manual",
+        message: "Este código ya existe en el inventario.",
+      })
+    } else {
+      form.clearErrors("codigo")
+    }
+  }, [watchedCodigo, repuestos, editingId, form])
+
   const watchedCategoria = form.watch("categoria")
+
+  const watchedImagen = form.watch("imagen")
+  const [formImagePreview, setFormImagePreview] = useState<string | null>(null)
+
+  useEffect(() => {
+    const fileList = watchedImagen as FileList | undefined
+    if (fileList && fileList.length > 0) {
+      const file = fileList[0]
+      const url = URL.createObjectURL(file)
+      setFormImagePreview(url)
+      return () => URL.revokeObjectURL(url)
+    } else if (editingId) {
+      const repuesto = repuestos.find(r => r.id === editingId)
+      setFormImagePreview(repuesto?.imagen_url ?? null)
+    } else {
+      setFormImagePreview(null)
+    }
+  }, [watchedImagen, editingId, repuestos])
 
   async function onSubmit(values: RepuestoForm) {
     try {
+      // Validar duplicado nuevamente al enviar para asegurar que no se guarde
+      const isDuplicate = repuestos.some(
+        (r) =>
+          r.codigo.toLowerCase().trim() === values.codigo.toLowerCase().trim() &&
+          r.id !== editingId
+      )
+
+      if (isDuplicate) {
+        form.setError("codigo", { type: "manual", message: "Este código ya existe en el inventario." })
+        toast({
+          title: "codigo duplicado",
+          description: "El codigo que intentas guardar ya esta",
+          variant: "destructive",
+        })
+        return
+      }
+
       if (!user) {
         toast({
           title: "Sesión requerida",
@@ -501,10 +557,6 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
         stockMaximo: 0,
         stockMinimo: 0,
         stockActual: 0,
-        ubicacion: "",
-        marca: "",
-        modelo: "",
-        notas: "",
         imagen: undefined,
       })
 
@@ -551,10 +603,6 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
       stockMaximo: repuesto.stockMaximo,
       stockMinimo: repuesto.stockMinimo,
       stockActual: repuesto.stockActual,
-      ubicacion: repuesto.ubicacion || "",
-      marca: repuesto.marca || "",
-      modelo: repuesto.modelo || "",
-      notas: repuesto.notas || "",
       imagen: undefined,
     })
     // Cuando abrimos el editor, asegurarnos de que el repuesto que se edita
@@ -712,8 +760,6 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
 
       const updated = json.data?.updatedRepuesto
       const lowStock = Boolean(json.data?.lowStock)
-      const usageId = json.data?.usageId
-      const usageStatus = json.data?.usageStatus || "pendiente"
 
       if (updated && typeof updated.id !== "undefined") {
         setRepuestos((prev) =>
@@ -736,37 +782,6 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
         description: `Se registró la solicitud de uso para el repuesto ${usoRepuesto.codigo}.`,
       })
 
-      // Refrescar notificaciones desde la BD para mostrar la nueva, y mostrar la del navegador
-      if (refreshNotifications) refreshNotifications();
-
-      try {
-        const notifTitle = `Uso de Repuesto ${usageStatus}`;
-        const notifMessage = `Responsable: ${usoResponsable.trim()}\nRepuesto: ${usoCantidad} x ${usoRepuesto.nombre}\nMáquina: ${maquinaLabel}`;
-        let currentPermission = permission;
-        if (currentPermission === 'default' && typeof window !== 'undefined' && 'Notification' in window) {
-          currentPermission = await requestPermission();
-        }
-
-        // Mostrar notificación del navegador
-        if (currentPermission === 'granted' && typeof window !== 'undefined' && 'Notification' in window) {
-          const browserNotif = new Notification(notifTitle, {
-            body: notifMessage,
-            tag: `uso-repuesto-${usageId}`,
-            data: { 
-              url: `${window.location.origin}/dashboard/usos-repuestos?selectedUsageId=${usageId}` 
-            }
-          });
-          
-          browserNotif.onclick = (event) => {
-            event.preventDefault();
-            window.focus();
-            if (browserNotif.data?.url) window.location.href = browserNotif.data.url;
-          };
-        }
-      } catch (e) {
-        console.warn("No se pudo crear la notificación de navegador para solicitud de uso", e)
-      }
-
       if (lowStock) {
         toast({
           title: "Stock mínimo alcanzado",
@@ -775,6 +790,8 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
           variant: "destructive",
         })
       }
+
+    
 
       handleCloseUso()
     } catch (err: any) {
@@ -813,31 +830,98 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
     return "bg-emerald-200 border-l-4 border-emerald-500 font-semibold"
   }
 
-  const machineForDetail = machineDetailCode
-    ? equipos.find((e: any) => e.codigo === machineDetailCode)
-    : null
-
-  const handleExport = (format: 'excel' | 'pdf' | 'word') => {
-    const dataToExport = repuestos.map((r) => ({
+  const handleExportExcel = () => {
+    const dataToExport = repuestos.map(r => ({
       'Código': r.codigo,
       'Nombre': r.nombre,
+      'Descripción': r.descripcion,
       'Categoría': r.categoria,
-      'Subcategoría': r.subcategoria || '-',
-      'Codigo Compra': r.codigoCompra || '-',
-      'Ubicación': r.ubicacion || '-',
+      'Subcategoría': r.subcategoria,
+      'Código de Compra': r.codigoCompra,
+      'Proveedor': r.proveedor,
+      'Precio': r.precio,
       'Stock Actual': r.stockActual,
       'Stock Mínimo': r.stockMinimo,
-      'Precio': r.precio,
-      'Proveedor': r.proveedor || '-'
-    }))
+      'Ubicación': r.ubicacion,
+      'Marca': r.marca,
+      'Modelo': r.modelo,
+      'Notas': r.notas,
+    }));
 
-    const columns = ['Código', 'Nombre', 'Categoría', 'Subcategoría', 'Codigo Compra', 'Stock Actual', 'Stock Mínimo', 'Precio', 'Proveedor']
-    const filename = `Inventario_Repuestos_${new Date().toISOString().split('T')[0]}`
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Inventario");
+    XLSX.writeFile(workbook, "inventario_repuestos.xlsx");
+    toast({ title: "Exportación Exitosa", description: "El inventario se ha exportado a Excel." });
+  };
 
-    if (format === 'excel') exportToExcel(dataToExport, filename)
-    else if (format === 'pdf') exportToPDF(dataToExport, columns, 'Inventario de Repuestos', filename)
-    else if (format === 'word') exportToWord(dataToExport, columns, 'Inventario de Repuestos', filename)
-  }
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    doc.text("Inventario de Repuestos", 14, 16);
+    
+    const tableColumn = ["Código", "Nombre", "Categoría", "Subcategoría", "Precio", "Stock Actual"];
+    const tableRows: (string | number)[][] = [];
+
+    repuestos.forEach(r => {
+      const repuestoData = [
+        r.codigo,
+        r.nombre,
+        r.categoria,
+        r.subcategoria || '-',
+        formatPrice(r.precio),
+        r.stockActual,
+      ];
+      tableRows.push(repuestoData);
+    });
+
+    (doc as any).autoTable({
+      head: [tableColumn],
+      body: tableRows,
+      startY: 20,
+    });
+
+    doc.save("inventario_repuestos.pdf");
+    toast({ title: "Exportación Exitosa", description: "El inventario se ha exportado a PDF." });
+  };
+
+  const handleExportWord = () => {
+    const headers = [
+      'Código', 'Nombre', 'Categoría', 'Subcategoría', 'Precio', 'Stock Actual'
+    ];
+
+    const headerRow = new TableRow({
+      children: headers.map(header => new TableCell({
+        children: [new Paragraph({
+          children: [new TextRun({ text: header, bold: true })]
+        })],
+      })),
+    });
+
+    const dataRows = repuestos.map(r => new TableRow({
+      children: [
+        new TableCell({ children: [new Paragraph(r.codigo)] }),
+        new TableCell({ children: [new Paragraph(r.nombre)] }),
+        new TableCell({ children: [new Paragraph(r.categoria)] }),
+        new TableCell({ children: [new Paragraph(r.subcategoria || '-')] }),
+        new TableCell({ children: [new Paragraph(formatPrice(r.precio))] }),
+        new TableCell({ children: [new Paragraph(String(r.stockActual))] }),
+      ],
+    }));
+
+    const table = new Table({
+      rows: [headerRow, ...dataRows],
+      width: { size: 100, type: WidthType.PERCENTAGE },
+    });
+
+    const doc = new Document({
+      sections: [{ children: [ new Paragraph({ children: [new TextRun({ text: "Inventario de Repuestos", bold: true, size: 28 })] }), table ] }],
+    });
+
+    Packer.toBlob(doc).then(blob => {
+      saveAs(blob, "inventario_repuestos.docx");
+      toast({ title: "Exportación Exitosa", description: "El inventario se ha exportado a Word." });
+    });
+  };
 
   return (
     <div className="mx-auto max-w-6xl px-3 sm:px-4">
@@ -851,66 +935,58 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
         </div>
 
         <div className="flex gap-2 self-start sm:self-auto">
-          
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="gap-2">
-                <Download className="h-4 w-4" />
-                <span className="hidden sm:inline">Exportar</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleExport('excel')}>
-                <FileSpreadsheet className="mr-2 h-4 w-4 text-green-600" /> Excel
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport('pdf')}>
-                <FileText className="mr-2 h-4 w-4 text-red-600" /> PDF
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport('word')}>
-                <File className="mr-2 h-4 w-4 text-blue-600" /> Word
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
           {isAdmin && (
             <Button
               className="bg-red-600 hover:bg-red-700"
-              onClick={() => setOpen(true)}
+              onClick={() => {
+                setEditingId(null)
+                form.reset()
+                setOpen(true)
+              }}
             >
               Añadir Repuesto
             </Button>
           )}
           <Link href="/dashboard/usos-repuestos">
-            <Button variant="outline" className="text-xs">
+            <Button variant="outline" className="w-full sm:w-auto gap-2">
               Ver usos de repuestos
             </Button>
           </Link>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Download className="mr-2 h-4 w-4" /> Exportar
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={handleExportExcel}>
+                <FileSpreadsheet className="mr-2 h-4 w-4 text-green-600" /> Excel
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportPDF}>
+                <FileText className="mr-2 h-4 w-4 text-red-600" /> PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportWord}>
+                <File className="mr-2 h-4 w-4 text-blue-600" /> Word
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      {/* Card con categorías */}
-      <div className="mt-6 rounded-md border bg-card">
-        <div className="border-b px-4 py-3 text-sm text-muted-foreground">
-          Inventario organizado por categoría
-        </div>
-
-        {loadingRepuestos ? (
-          <div className="flex flex-col items-center justify-center py-12">
-            <div className="mb-2 h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
-            <span className="text-sm text-muted-foreground">Cargando repuestos...</span>
-          </div>
-        ) : (
-        <div className="divide-y">
+      {/* Categorías separadas */}
+      <div className="mt-6 space-y-4">
           {/* Mecánica */}
-          <div>
-            <button
-              type="button"
-              className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-accent"
-              onClick={() => toggleCategoria("Mecanico")}
-            >
-              <span className="font-medium">Mecánica</span>
-              <span>{expandedCategoria === "Mecanico" ? "▴" : "▾"}</span>
-            </button>
+          <div className="rounded-md border bg-card overflow-hidden">
+            <div className="flex w-full items-center justify-between px-4 py-3">
+              <span className="font-medium">Mecánica ({getRepuestosByCategoria("Mecanico").length})</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => toggleCategoria("Mecanico")}
+              >
+                {expandedCategoria === "Mecanico" ? "Ocultar" : "Ver"}
+              </Button>
+            </div>
 
             {expandedCategoria === "Mecanico" && (
               <div className="px-4 pb-3 text-sm text-muted-foreground space-y-3">
@@ -932,7 +1008,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                   </div>
                 )}
                 {/* Mobile: tarjetas compactas */}
-                <div className="sm:hidden space-y-3">
+                <div className="sm:hidden space-y-3 max-h-[60vh] overflow-y-auto">
                   {getRepuestosByCategoria("Mecanico").length === 0 ? (
                     <div className="text-[11px] text-center text-muted-foreground">Aún no hay repuestos registrados en esta categoría.</div>
                   ) : (
@@ -993,8 +1069,12 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                     ))
                   )}
                 </div>
+                <div className="sm:hidden mt-2 rounded-md border bg-muted p-3 text-sm font-medium flex justify-between items-center">
+                  <span>Total Valorizado:</span>
+                  <span>{formatPrice(getCategoriaTotalValue("Mecanico"))}</span>
+                </div>
 
-                <div className="hidden sm:block overflow-x-auto">
+                <div className="hidden sm:block overflow-x-auto max-h-[60vh] overflow-y-auto">
                   <table className="min-w-full border text-sm">
                     <thead className="bg-muted/50">
                       <tr>
@@ -1022,7 +1102,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                             <tr
                               id={`repuesto-${r.id}`}
                               onClick={() => { if (highlightedRowId) setHighlightedRowId(null) }}
-                              className={`align-top ${getStockRowClass(r)} ${highlightedRowId === r.id ? 'border-l-4 border-blue-600 bg-blue-100 shadow-lg transform scale-[1.01] transition-all duration-200 z-10' : ''} ${pulseHighlightId === r.id ? 'animate-pulse' : ''}`}
+                              className={`align-top transition-all duration-200 ${pulseHighlightId === r.id ? 'animate-pulse' : ''} ${highlightedRowId === r.id ? 'border-l-4 border-blue-600 bg-blue-100 shadow-lg transform scale-[1.01] z-10' : getStockRowClass(r)}`}
                             >
                               <td className="border px-2 py-1">
                                 <button
@@ -1042,13 +1122,13 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                                   )}
                                 </button>
                               </td>
-                              <td className={`border px-2 py-1 align-top font-medium ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.codigo}</td>
-                              <td className={`border px-2 py-1 align-top truncate max-w-[200px] ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.nombre}</td>
-                              <td className={`border px-2 py-1 align-top truncate max-w-[260px] ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.descripcion}</td>
-                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.codigoCompra}</td>
-                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.proveedor}</td>
-                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{formatPrice(r.precio)}</td>
-                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.stockActual}</td>
+                              <td className="border px-2 py-1 align-top font-medium">{r.codigo}</td>
+                              <td className="border px-2 py-1 align-top truncate max-w-[200px]">{r.nombre}</td>
+                              <td className="border px-2 py-1 align-top truncate max-w-[260px]">{r.descripcion}</td>
+                              <td className="border px-2 py-1 align-top">{r.codigoCompra}</td>
+                              <td className="border px-2 py-1 align-top">{r.proveedor}</td>
+                              <td className="border px-2 py-1 text-right align-top">{formatPrice(r.precio)}</td>
+                              <td className="border px-2 py-1 text-right align-top">{r.stockActual}</td>
                               <td className="border px-2 py-1 align-top">
                                 <div className="flex items-center justify-center gap-1">
                                   <Button
@@ -1097,6 +1177,13 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                         ))
                       )}
                     </tbody>
+                    <tfoot className="bg-muted font-medium sticky bottom-0">
+                      <tr>
+                        <td colSpan={6} className="border px-2 py-2 text-right">Total Valorizado:</td>
+                        <td className="border px-2 py-2 text-right">{formatPrice(getCategoriaTotalValue("Mecanico"))}</td>
+                        <td className="border px-2 py-2" colSpan={2}></td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               </div>
@@ -1104,15 +1191,17 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
           </div>
 
           {/* Eléctrica */}
-          <div>
-            <button
-              type="button"
-              className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-accent"
-              onClick={() => toggleCategoria("Electrico")}
-            >
-              <span className="font-medium">Eléctrica</span>
-              <span>{expandedCategoria === "Electrico" ? "▴" : "▾"}</span>
-            </button>
+          <div className="rounded-md border bg-card overflow-hidden">
+            <div className="flex w-full items-center justify-between px-4 py-3">
+              <span className="font-medium">Eléctrica ({getRepuestosByCategoria("Electrico").length})</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => toggleCategoria("Electrico")}
+              >
+                {expandedCategoria === "Electrico" ? "Ocultar" : "Ver"}
+              </Button>
+            </div>
 
             {expandedCategoria === "Electrico" && (
               <div className="px-4 pb-3 text-sm text-muted-foreground space-y-3">
@@ -1134,7 +1223,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                   </div>
                 )}
 
-                <div className="sm:hidden space-y-3">
+                <div className="sm:hidden space-y-3 max-h-[60vh] overflow-y-auto">
                   {getRepuestosByCategoria("Electrico").length === 0 ? (
                     <div className="text-[11px] text-center text-muted-foreground">Aún no hay repuestos registrados en esta categoría.</div>
                   ) : (
@@ -1195,8 +1284,12 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                     ))
                   )}
                 </div>
+                <div className="sm:hidden mt-2 rounded-md border bg-muted p-3 text-sm font-medium flex justify-between items-center">
+                  <span>Total Valorizado:</span>
+                  <span>{formatPrice(getCategoriaTotalValue("Electrico"))}</span>
+                </div>
 
-                <div className="hidden sm:block overflow-x-auto">
+                <div className="hidden sm:block overflow-x-auto max-h-[60vh] overflow-y-auto">
                   <table className="min-w-full border text-sm">
                     <thead className="bg-muted/50">
                       <tr>
@@ -1224,7 +1317,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                             <tr
                               id={`repuesto-${r.id}`}
                               onClick={() => { if (highlightedRowId) setHighlightedRowId(null) }}
-                              className={`align-top ${getStockRowClass(r)} ${highlightedRowId === r.id ? 'border-l-4 border-blue-600 bg-blue-100 shadow-lg transform scale-[1.01] transition-all duration-200 z-10' : ''} ${pulseHighlightId === r.id ? 'animate-pulse' : ''}`}
+                              className={`align-top transition-all duration-200 ${pulseHighlightId === r.id ? 'animate-pulse' : ''} ${highlightedRowId === r.id ? 'border-l-4 border-blue-600 bg-blue-100 shadow-lg transform scale-[1.01] z-10' : getStockRowClass(r)}`}
                             >
                               <td className="border px-2 py-1">
                                 <button
@@ -1244,13 +1337,13 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                                   )}
                                 </button>
                               </td>
-                              <td className={`border px-2 py-1 align-top font-medium ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.codigo}</td>
-                              <td className={`border px-2 py-1 align-top truncate max-w-[200px] ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.nombre}</td>
-                              <td className={`border px-2 py-1 align-top truncate max-w-[260px] ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.descripcion}</td>
-                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.codigoCompra}</td>
-                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.proveedor}</td>
-                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{formatPrice(r.precio)}</td>
-                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.stockActual}</td>
+                              <td className="border px-2 py-1 align-top font-medium">{r.codigo}</td>
+                              <td className="border px-2 py-1 align-top truncate max-w-[200px]">{r.nombre}</td>
+                              <td className="border px-2 py-1 align-top truncate max-w-[260px]">{r.descripcion}</td>
+                              <td className="border px-2 py-1 align-top">{r.codigoCompra}</td>
+                              <td className="border px-2 py-1 align-top">{r.proveedor}</td>
+                              <td className="border px-2 py-1 text-right align-top">{formatPrice(r.precio)}</td>
+                              <td className="border px-2 py-1 text-right align-top">{r.stockActual}</td>
                               <td className="border px-2 py-1 align-top">
                                 <div className="flex items-center justify-center gap-1">
                                   <Button
@@ -1299,6 +1392,13 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                         ))
                       )}
                     </tbody>
+                    <tfoot className="bg-muted font-medium sticky bottom-0">
+                      <tr>
+                        <td colSpan={6} className="border px-2 py-2 text-right">Total Valorizado:</td>
+                        <td className="border px-2 py-2 text-right">{formatPrice(getCategoriaTotalValue("Electrico"))}</td>
+                        <td className="border px-2 py-2" colSpan={2}></td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               </div>
@@ -1306,15 +1406,17 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
           </div>
 
           {/* Neumática */}
-          <div>
-            <button
-              type="button"
-              className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-accent"
-              onClick={() => toggleCategoria("Neumatico")}
-            >
-              <span className="font-medium">Neumática</span>
-              <span>{expandedCategoria === "Neumatico" ? "▴" : "▾"}</span>
-            </button>
+          <div className="rounded-md border bg-card overflow-hidden">
+            <div className="flex w-full items-center justify-between px-4 py-3">
+              <span className="font-medium">Neumática ({getRepuestosByCategoria("Neumatico").length})</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => toggleCategoria("Neumatico")}
+              >
+                {expandedCategoria === "Neumatico" ? "Ocultar" : "Ver"}
+              </Button>
+            </div>
 
             {expandedCategoria === "Neumatico" && (
               <div className="px-4 pb-3 text-sm text-muted-foreground space-y-3">
@@ -1336,7 +1438,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                   </div>
                 )}
 
-                <div className="sm:hidden space-y-3">
+                <div className="sm:hidden space-y-3 max-h-[60vh] overflow-y-auto">
                   {getRepuestosByCategoria("Neumatico").length === 0 ? (
                     <div className="text-[11px] text-center text-muted-foreground">Aún no hay repuestos registrados en esta categoría.</div>
                   ) : (
@@ -1397,8 +1499,12 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                     ))
                   )}
                 </div>
+                <div className="sm:hidden mt-2 rounded-md border bg-muted p-3 text-sm font-medium flex justify-between items-center">
+                  <span>Total Valorizado:</span>
+                  <span>{formatPrice(getCategoriaTotalValue("Neumatico"))}</span>
+                </div>
 
-                <div className="hidden sm:block overflow-x-auto">
+                <div className="hidden sm:block overflow-x-auto max-h-[60vh] overflow-y-auto">
                   <table className="min-w-full border text-sm">
                     <thead className="bg-muted/50">
                       <tr>
@@ -1426,7 +1532,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                             <tr
                               id={`repuesto-${r.id}`}
                               onClick={() => { if (highlightedRowId) setHighlightedRowId(null) }}
-                              className={`align-top ${getStockRowClass(r)} ${highlightedRowId === r.id ? '!border-l-4 !border-blue-600 !bg-blue-100 shadow-lg transform scale-[1.01] transition-all duration-200 z-10' : ''} ${pulseHighlightId === r.id ? 'animate-pulse' : ''}`}
+                              className={`align-top transition-all duration-200 ${pulseHighlightId === r.id ? 'animate-pulse' : ''} ${highlightedRowId === r.id ? 'border-l-4 border-blue-600 bg-blue-100 shadow-lg transform scale-[1.01] z-10' : getStockRowClass(r)}`}
                             >
                               <td className="border px-2 py-1">
                                 <button
@@ -1446,13 +1552,13 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                                   )}
                                 </button>
                               </td>
-                              <td className={`border px-2 py-1 align-top font-medium ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.codigo}</td>
-                              <td className={`border px-2 py-1 align-top truncate max-w-[200px] ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.nombre}</td>
-                              <td className={`border px-2 py-1 align-top truncate max-w-[260px] ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.descripcion}</td>
-                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.codigoCompra}</td>
-                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.proveedor}</td>
-                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{formatPrice(r.precio)}</td>
-                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? 'border-blue-500 rounded-md bg-blue-50 p-1' : ''}`}>{r.stockActual}</td>
+                              <td className="border px-2 py-1 align-top font-medium">{r.codigo}</td>
+                              <td className="border px-2 py-1 align-top truncate max-w-[200px]">{r.nombre}</td>
+                              <td className="border px-2 py-1 align-top truncate max-w-[260px]">{r.descripcion}</td>
+                              <td className="border px-2 py-1 align-top">{r.codigoCompra}</td>
+                              <td className="border px-2 py-1 align-top">{r.proveedor}</td>
+                              <td className="border px-2 py-1 text-right align-top">{formatPrice(r.precio)}</td>
+                              <td className="border px-2 py-1 text-right align-top">{r.stockActual}</td>
                               <td className="border px-2 py-1 align-top">
                                 <div className="flex items-center justify-center gap-1">
                                   <Button
@@ -1501,6 +1607,13 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                         ))
                       )}
                     </tbody>
+                    <tfoot className="bg-muted font-medium sticky bottom-0">
+                      <tr>
+                        <td colSpan={6} className="border px-2 py-2 text-right">Total Valorizado:</td>
+                        <td className="border px-2 py-2 text-right">{formatPrice(getCategoriaTotalValue("Neumatico"))}</td>
+                        <td className="border px-2 py-2" colSpan={2}></td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               </div>
@@ -1508,19 +1621,21 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
           </div>
 
           {/* Otro */}
-          <div>
-            <button
-              type="button"
-              className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-accent"
-              onClick={() => toggleCategoria("Otro")}
-            >
-              <span className="font-medium">Otro</span>
-              <span>{expandedCategoria === "Otro" ? "▴" : "▾"}</span>
-            </button>
+          <div className="rounded-md border bg-card overflow-hidden">
+            <div className="flex w-full items-center justify-between px-4 py-3">
+              <span className="font-medium">Otro ({getRepuestosByCategoria("Otro").length})</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => toggleCategoria("Otro")}
+              >
+                {expandedCategoria === "Otro" ? "Ocultar" : "Ver"}
+              </Button>
+            </div>
 
             {expandedCategoria === "Otro" && (
               <div className="px-4 pb-3 text-sm text-muted-foreground space-y-3">
-                <div className="sm:hidden space-y-3">
+                <div className="sm:hidden space-y-3 max-h-[60vh] overflow-y-auto">
                   {getRepuestosByCategoria("Otro").length === 0 ? (
                     <div className="text-[11px] text-center text-muted-foreground">Aún no hay repuestos registrados en esta categoría.</div>
                   ) : (
@@ -1581,8 +1696,12 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                     ))
                   )}
                 </div>
+                <div className="sm:hidden mt-2 rounded-md border bg-muted p-3 text-sm font-medium flex justify-between items-center">
+                  <span>Total Valorizado:</span>
+                  <span>{formatPrice(getCategoriaTotalValue("Otro"))}</span>
+                </div>
 
-                <div className="hidden sm:block overflow-x-auto">
+                <div className="hidden sm:block overflow-x-auto max-h-[60vh] overflow-y-auto">
                   <table className="min-w-full border text-sm">
                     <thead className="bg-muted/50">
                       <tr>
@@ -1610,7 +1729,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                             <tr
                               id={`repuesto-${r.id}`}
                               onClick={() => { if (highlightedRowId) setHighlightedRowId(null) }}
-                              className={`align-top ${getStockRowClass(r)} ${highlightedRowId === r.id ? 'border-l-4 border-blue-600 bg-blue-100 shadow-lg transform scale-[1.01] transition-all duration-200 z-10' : ''} ${pulseHighlightId === r.id ? 'animate-pulse' : ''}`}
+                              className={`align-top transition-all duration-200 ${pulseHighlightId === r.id ? 'animate-pulse' : ''} ${highlightedRowId === r.id ? 'border-l-4 border-blue-600 bg-blue-100 shadow-lg transform scale-[1.01] z-10' : getStockRowClass(r)}`}
                             >
                               <td className="border px-2 py-1">
                                 <button
@@ -1630,13 +1749,13 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                                   )}
                                 </button>
                               </td>
-                              <td className={`border px-2 py-1 align-top font-medium ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{r.codigo}</td>
-                              <td className={`border px-2 py-1 align-top truncate max-w-[200px] ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{r.nombre}</td>
-                              <td className={`border px-2 py-1 align-top truncate max-w-[260px] ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{r.descripcion}</td>
-                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{r.codigoCompra}</td>
-                              <td className={`border px-2 py-1 align-top ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{r.proveedor}</td>
-                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{formatPrice(r.precio)}</td>
-                              <td className={`border px-2 py-1 text-right align-top ${highlightedRowId === r.id ? '!border-blue-500 !rounded-md !bg-blue-50 p-1' : ''}`}>{r.stockActual}</td>
+                              <td className="border px-2 py-1 align-top font-medium">{r.codigo}</td>
+                              <td className="border px-2 py-1 align-top truncate max-w-[200px]">{r.nombre}</td>
+                              <td className="border px-2 py-1 align-top truncate max-w-[260px]">{r.descripcion}</td>
+                              <td className="border px-2 py-1 align-top">{r.codigoCompra}</td>
+                              <td className="border px-2 py-1 align-top">{r.proveedor}</td>
+                              <td className="border px-2 py-1 text-right align-top">{formatPrice(r.precio)}</td>
+                              <td className="border px-2 py-1 text-right align-top">{r.stockActual}</td>
                               <td className="border px-2 py-1 align-top">
                                 <div className="flex items-center justify-center gap-1">
                                   <Button
@@ -1685,18 +1804,23 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                         ))
                       )}
                     </tbody>
+                    <tfoot className="bg-muted font-medium sticky bottom-0">
+                      <tr>
+                        <td colSpan={6} className="border px-2 py-2 text-right">Total Valorizado:</td>
+                        <td className="border px-2 py-2 text-right">{formatPrice(getCategoriaTotalValue("Otro"))}</td>
+                        <td className="border px-2 py-2" colSpan={2}></td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               </div>
             )}
           </div>
-        </div>
-        )}
       </div>
 
       {/* Dialog de preview de imagen */}
       <Dialog open={imagePreviewOpen} onOpenChange={setImagePreviewOpen}>
-        <DialogContent className="max-w-3xl sm:max-w-xl">
+        <DialogContent className="max-w-xl sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Imagen de repuesto</DialogTitle>
             <DialogDescription>Vista ampliada de la imagen del repuesto.</DialogDescription>
@@ -1721,7 +1845,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
           setUsoOpen(true)
         }
       }}>
-        <DialogContent className="max-w-2xl sm:max-w-lg">
+        <DialogContent className="max-w-lg sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Solicitud de uso de repuesto</DialogTitle>
             <DialogDescription>
@@ -1784,90 +1908,62 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                   value={usoResponsable}
                   onChange={(e) => setUsoResponsable(e.target.value)}
                   className="mt-1 h-9 text-xs"
-                  placeholder="Nombre del responsable"
+                  placeholder=""
                 />
               </div>
             </div>
 
             <div className="relative">
               <label className="text-xs font-medium">Máquina que requiere</label>
-              {usoMaquinaSeleccionada ? (
-                <div className="mt-1 flex items-center justify-between rounded-md border bg-muted/40 p-2">
-                  <span className="text-xs font-medium">{usoMaquina}</span>
-                  <div className="flex items-center">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-auto px-2 py-1 text-xs"
-                      onClick={() => setMachineDetailCode(usoMaquinaSeleccionada.codigo)}
-                    >
-                      Ver ficha
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-auto px-1 py-1 text-xs text-destructive hover:bg-destructive/10"
-                      onClick={() => {
-                        setUsoMaquina('');
-                        setUsoMaquinaSeleccionada(null);
-                      }}
-                    >
-                      X
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <Input
-                    value={usoMaquina}
-                    onChange={(e) => {
-                      setUsoMaquina(e.target.value)
-                      setUsoMaquinaSeleccionada(null)
-                    }}
-                    onFocus={() => setUsoMaquinaFocused(true)}
-                    onBlur={() => {
-                      setTimeout(() => setUsoMaquinaFocused(false), 150)
-                    }}
-                    className="mt-1 h-9 text-xs"
-                    placeholder="Ej: CODIGO - Área - Línea - Equipo"
-                  />
-                  {usoMaquinaFocused && usoMaquina.trim() !== "" && maquinaSuggestions.length > 0 && (
-                    <div className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-background text-[11px] shadow">
-                      {maquinaSuggestions.map((eq: any) => {
-                        const areaPart = eq.area ? ` - ${eq.area}` : ""
-                        const lineaPart = eq.linea ? ` - ${eq.linea}` : ""
-                        const label = `${eq.codigo}${areaPart}${lineaPart} - ${eq.nombre || ""}`
+              <Input
+                value={usoMaquina}
+                onChange={(e) => {
+                  setUsoMaquina(e.target.value)
+                  setUsoMaquinaSeleccionada(null)
+                }}
 
-                        return (
-                          <button
-                            key={eq.id}
-                            type="button"
-                            className="flex w-full cursor-pointer items-start gap-1 px-2 py-1 text-left hover:bg-muted"
-                            onMouseDown={(ev) => {
-                              ev.preventDefault()
-                              setUsoMaquina(label)
-                              setUsoMaquinaSeleccionada(eq)
-                              setUsoMaquinaFocused(false)
-                            }}
-                          >
-                            <span className="font-semibold">{eq.codigo}</span>
-                            <span className="text-muted-foreground truncate">
-                              {areaPart.replace(" - ", "")}
-                              {lineaPart}
-                              {eq.nombre ? ` - ${eq.nombre}` : ""}
-                            </span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                </>
+                onFocus={() => setUsoMaquinaFocused(true)}
+                onBlur={() => {
+                  // pequeño delay para permitir click en la sugerencia
+                  setTimeout(() => setUsoMaquinaFocused(false), 150)
+                }}
+                className="mt-1 h-9 text-xs"
+                placeholder=""
+              />
+
+              {usoMaquinaFocused && usoMaquina.trim() !== "" && maquinaSuggestions.length > 0 && (
+                <div className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-background text-[11px] shadow">
+                  {maquinaSuggestions.map((eq: any) => {
+                    const areaPart = eq.area ? ` - ${eq.area}` : ""
+                    const lineaPart = eq.linea ? ` - ${eq.linea}` : ""
+                    const label = `${eq.codigo}${areaPart}${lineaPart} - ${eq.nombre || ""}`
+
+                    return (
+                      <button
+                        key={eq.id}
+                        type="button"
+                        className="flex w-full cursor-pointer items-start gap-1 px-2 py-1 text-left hover:bg-muted"
+                        onMouseDown={(ev) => {
+                          ev.preventDefault()
+                          setUsoMaquina(label)
+                          setUsoMaquinaSeleccionada(eq)
+                          setUsoMaquinaFocused(false)
+                        }}
+                      >
+                        <span className="font-semibold">{eq.codigo}</span>
+                        <span className="text-muted-foreground truncate">
+                          {areaPart.replace(" - ", "")}
+                          {lineaPart}
+                          {eq.nombre ? ` - ${eq.nombre}` : ""}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
               )}
 
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Empieza a escribir el código, área, línea o nombre del equipo para ver sugerencias.
+                
               </p>
             </div>
 
@@ -1878,7 +1974,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                 value={usoDescripcion}
                 onChange={(e) => setUsoDescripcion(e.target.value)}
                 className="mt-1 text-xs"
-                placeholder="El operario puede describir aquí cómo se usó el repuesto."
+                placeholder=""
               />
             </div>
           </div>
@@ -1894,23 +1990,15 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
         </DialogContent>
       </Dialog>
 
-      <EquipmentDetailModal
-        equipment={machineForDetail as any}
-        isOpen={!!machineDetailCode}
-        onClose={() => setMachineDetailCode(null)}
-        isLoading={!!machineDetailCode && equiposLoading}
-        showHojaDeVidaButton={true}
-      />
-
 
 
             {/* Dialog de formulario */}
 
             <Dialog open={open} onOpenChange={setOpen}>
 
-              <DialogContent className="max-w-2xl sm:max-w-lg">
+              <DialogContent className="max-w-lg sm:max-w-2xl">
 
-                <DialogHeader>
+                 <DialogHeader>
 
                   <DialogTitle>{editingId ? "Editar" : "Registrar"} repuesto</DialogTitle>
 
@@ -1944,7 +2032,10 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
 
                             <FormControl>
 
-                              <Input {...form.register("codigo")} />
+                              <Input 
+                                {...form.register("codigo")} 
+                                className={form.formState.errors.codigo ? "border-red-500 focus-visible:ring-red-500" : ""}
+                              />
 
                             </FormControl>
 
@@ -2069,9 +2160,52 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                             <FormLabel>Imagen</FormLabel>
 
                             <FormControl>
-
-                              <Input type="file" accept="image/*" {...form.register("imagen")} />
-
+                              <div className="space-y-3">
+                                <Input 
+                                  type="file" 
+                                  accept="image/*" 
+                                  {...form.register("imagen", {
+                                    validate: (value) => {
+                                      if (value && value[0]) {
+                                        const file = value[0];
+                                        if (file.size > 5 * 1024 * 1024) return "La imagen debe ser menor a 5MB";
+                                        if (!file.type.startsWith('image/')) return "Archivo no válido";
+                                      }
+                                      return true;
+                                    }
+                                  })} 
+                                />
+                                {formImagePreview && (
+                                  <div className="relative group w-fit">
+                                    <div 
+                                      className="relative h-24 w-24 overflow-hidden rounded-md border cursor-pointer"
+                                      onClick={() => openImagePreview(formImagePreview)}
+                                    >
+                                      <img 
+                                        src={formImagePreview} 
+                                        alt="Preview" 
+                                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" 
+                                      />
+                                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                        <Maximize2 className="h-5 w-5 text-white" />
+                                      </div>
+                                    </div>
+                                    
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.preventDefault()
+                                        e.stopPropagation()
+                                        form.resetField("imagen")
+                                      }}
+                                      className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/90"
+                                      title="Eliminar imagen"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </FormControl>
 
                             <FormMessage />
@@ -2152,7 +2286,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
 
                             <FormItem>
 
-                              <FormLabel>Stock actual</FormLabel>
+                              <FormLabel>Stock Actual</FormLabel>
 
                               <FormControl>
 
@@ -2174,7 +2308,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
 
                             <FormItem>
 
-                              <FormLabel>Stock mínimo</FormLabel>
+                              <FormLabel>Stock mínimo (para alertas)</FormLabel>
 
                               <FormControl>
 

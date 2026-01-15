@@ -7,9 +7,11 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { signInWithEmail } from '@/firebase/auth/auth-service'
+import { Eye, EyeOff } from "lucide-react";
 
 
-// Demo accounts for local testing
+
+// validacion de emails demo 
 const DEMO_ADMIN_EMAIL = 'admin@demo.local'
 const DEMO_USER_EMAIL = 'user@demo.local'
 
@@ -36,6 +38,7 @@ type EmailFormValues = z.infer<typeof emailSchema>;
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const { user, loading: userLoading } = useUser();
   const { toast } = useToast();
   
@@ -80,10 +83,14 @@ export default function LoginPage() {
   } catch (err: any) {
   console.error("Login error", err);
 
+ //mostrar mensaje de error 
+
   let msg = "No se pudo iniciar sesión. Verifica tu correo y contraseña.";
   if (err?.code === "auth/invalid-credential") {
     msg = "Correo o contraseña incorrectos.";
   }
+
+  //mouestra error al iniciar seccion si las credenciales son incorrectas 
 
   toast({
     title: "Error de inicio de sesión",
@@ -94,6 +101,9 @@ export default function LoginPage() {
   setLoading(false);
 }
 };
+
+
+//funcion para validar 
 
   const fillAdmin = () => {
     form.setValue('email', process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',')[0]?.trim() || DEMO_ADMIN_EMAIL)
@@ -120,12 +130,12 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen w-full flex-col items-center justify-center bg-background">
-      <div className="mb-8 flex flex-col items-center text-center">
+      <div className="mb-8 flex flex-col items-center text-center animate-in fade-in zoom-in-95 slide-in-from-top-8 duration-500">
         <Logo width={200} height={100} className="mb-4" />
         <h1 className="text-3xl font-bold">Area de Mantenimiento</h1>
-        <p className="text-muted-foreground">Inicia sesión para gestionar las tareas</p>
+        <p className="text-muted-foreground">Inicia sesión para gestionar labores</p>
       </div>
-      <Card className="w-[400px]">
+      <Card className="w-[400px] animate-in fade-in zoom-in-95 slide-in-from-bottom-8 duration-500">
         <form onSubmit={form.handleSubmit(handleEmailSignIn)}>
           <CardHeader>
             <CardTitle>Iniciar Sesión</CardTitle>
@@ -141,7 +151,22 @@ export default function LoginPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Contraseña</Label>
-              <Input id="password" type="password" {...form.register("password")} />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  {...form.register("password")}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                </Button>
+              </div>
                {form.formState.errors.password && <p className="text-xs text-destructive">{form.formState.errors.password.message}</p>}
             </div>
           </CardContent>

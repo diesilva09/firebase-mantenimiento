@@ -14,9 +14,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { formatPrice } from '@/lib/utils'
-import { ArrowLeft, Folder, Eye, Download, FileSpreadsheet, FileText, File } from "lucide-react"
+import { ArrowLeft, Folder, Eye, Download, FileSpreadsheet, FileText, File, PieChart as PieChartIcon } from "lucide-react"
 import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
 import { useUser } from '@/firebase/auth/use-user'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts"
 
 interface HojaVidaRow {
   fecha: string
@@ -45,6 +46,7 @@ export default function EquipoDetallePage() {
 
   const [attachmentsUrl, setAttachmentsUrl] = useState<string>("")
   const [loadingAttachments, setLoadingAttachments] = useState<boolean>(true)
+  const [showStats, setShowStats] = useState(false)
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -187,6 +189,26 @@ useEffect(() => {
     })
   }, [hojaVida, tipoFilter, startDateFilter, endDateFilter])
 
+  const maintenanceStats = useMemo(() => {
+    const counts: Record<string, number> = {
+      Correctivo: 0,
+      Preventivo: 0,
+      Rutinario: 0
+    };
+
+    filteredHojaVida.forEach((row) => {
+      if (row.tipo === 'Correctivo') counts.Correctivo++;
+      else if (row.tipo === 'Preventivo') counts.Preventivo++;
+      else if (row.tipo === 'Rutinario') counts.Rutinario++;
+    });
+
+    return [
+      { name: 'Correctivo', value: counts.Correctivo, color: '#ef4444' }, // Rojo
+      { name: 'Preventivo', value: counts.Preventivo, color: '#3b82f6' }, // Azul
+      { name: 'Rutinario', value: counts.Rutinario, color: '#f59e0b' },  // Ambar
+    ].filter(d => d.value > 0);
+  }, [filteredHojaVida]);
+
   const handleExportHojaVida = (format: 'excel' | 'pdf' | 'word') => {
     const dataToExport = filteredHojaVida.map(row => ({
       'Fecha': row.fecha,
@@ -231,6 +253,16 @@ useEffect(() => {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-medium">Hoja de vida</h2>
+            <div className="flex gap-2">
+              <Button
+                variant={showStats ? "secondary" : "outline"}
+                size="sm"
+                className="gap-2 h-8 text-xs"
+                onClick={() => setShowStats(!showStats)}
+              >
+                <PieChartIcon className="h-3.5 w-3.5" />
+                Grafica 
+              </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2 h-8 text-xs">
@@ -250,7 +282,36 @@ useEffect(() => {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            </div>
           </div>
+
+          {showStats && maintenanceStats.length > 0 && (
+            <div className="rounded-md border bg-card p-4">
+              <h3 className="text-sm font-medium mb-2">Estadísticas de Mantenimiento</h3>
+              <div className="h-[250px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={maintenanceStats}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      paddingAngle={5}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    >
+                      {maintenanceStats.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value: number, name: string) => [`${value} eventos`, name]} />
+                    <Legend verticalAlign="bottom" height={36}/>
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-2 text-[11px] sm:text-xs">
             <div className="flex flex-col gap-1">

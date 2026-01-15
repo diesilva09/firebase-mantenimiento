@@ -323,7 +323,7 @@ export function MaintenanceOrderForm() {
               <FormLabel>Zona</FormLabel>
               <FormControl>
                 <Input
-                  placeholder="Escribe la zona o área"
+                  placeholder="Escribe la zona o área (cuando sea labor de mantenimiento locativo o partes altas)"
                   value={zonaQuery}
                   onChange={(e) => {
                     const v = e.target.value

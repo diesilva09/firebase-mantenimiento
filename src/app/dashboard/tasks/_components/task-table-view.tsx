@@ -32,6 +32,9 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion"
 
+
+
+
 interface TaskTableViewProps {
   tasks: Task[];
   users: User[];
@@ -399,9 +402,7 @@ export function TaskTableView({ tasks, seenCompletedIds, onCompletedSeen, ...pro
   }, [tasksBySchedule, seenCompletedIds]);
 
   return (
-    <Card>
-      <CardContent className="p-0 sm:p-6">
-        <Tabs defaultValue="Maquinaria" className="pt-6">
+        <Tabs defaultValue="Maquinaria" className="w-full">
           <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 h-auto gap-1 sm:gap-0">
             {schedules.map(schedule => (
                 <TabsTrigger
@@ -423,7 +424,7 @@ export function TaskTableView({ tasks, seenCompletedIds, onCompletedSeen, ...pro
           </TabsList>
           
           {schedules.map(schedule => (
-            <TabsContent key={schedule} value={schedule}>
+            <TabsContent key={schedule} value={schedule} className="mt-6 space-y-6">
               <ScheduleTaskList 
                 schedule={schedule}
                 tasks={tasksBySchedule[schedule]} 
@@ -434,7 +435,5 @@ export function TaskTableView({ tasks, seenCompletedIds, onCompletedSeen, ...pro
             </TabsContent>
           ))}
         </Tabs>
-      </CardContent>
-    </Card>
   )
 }
