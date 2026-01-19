@@ -81,6 +81,13 @@ export function useEquipos() {
       setEquipos(fromDb)
       try {
         localStorage.setItem('equipos', JSON.stringify(fromDb))
+        // OPTIMIZACIÓN: Guardar en caché SIN imágenes para no saturar la memoria del móvil
+        // y evitar errores de cuota (QuotaExceededError).
+        const cacheData = fromDb.map(({ imageDataUrl, ...rest }) => ({
+          ...rest,
+          imageDataUrl: null 
+        }))
+        localStorage.setItem('equipos', JSON.stringify(cacheData))
       } catch {
         // si falla el localStorage, no rompemos la carga principal
       }

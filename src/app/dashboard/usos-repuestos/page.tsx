@@ -13,6 +13,8 @@ import { Input } from "@/components/ui/input"
 import { useNotificationsContext as useNotifications } from "@/context/notifications-context"
 import { useSearchParams } from "next/navigation"
 import type { Notification } from "@/lib/types"
+import { format } from "date-fns"
+import { es } from "date-fns/locale"
 
 
 
@@ -525,7 +527,7 @@ export default function UsosRepuestosPage() {
                       <React.Fragment key={u.id}>
                         <tr className="align-top">
                           <td className="border px-2 py-1">
-                            {new Date(u.createdAt).toLocaleString()}
+                            {format(new Date(u.createdAt), "dd MMM yyyy HH:mm", { locale: es })}
                           </td>
                           <td className="border px-2 py-1">
                             <div className="font-medium text-xs">
@@ -615,7 +617,7 @@ export default function UsosRepuestosPage() {
                                   {u.completadoAt && (
                                     <span>
                                       <span className="font-semibold">Completado: </span>
-                                      {new Date(u.completadoAt).toLocaleString()}
+                                      {format(new Date(u.completadoAt), "PPP p", { locale: es })}
                                     </span>
                                   )}
                                   {u.completadoPor && (
@@ -652,7 +654,7 @@ export default function UsosRepuestosPage() {
                         {u.repuestoCodigo}
                       </div>
                       <div className="text-[10px] text-muted-foreground">
-                        {new Date(u.createdAt).toLocaleDateString()}
+                        {format(new Date(u.createdAt), "dd MMM yyyy", { locale: es })}
                       </div>
                     </div>
                     
@@ -723,7 +725,7 @@ export default function UsosRepuestosPage() {
                       <div className="mt-2 pt-2 border-t text-[11px] space-y-1 bg-muted/20 -mx-3 -mb-3 p-3 rounded-b-md">
                         <div><span className="font-semibold">Descripción uso:</span> {u.descripcionUso || "Sin descripción"}</div>
                         <div><span className="font-semibold">Categoría:</span> {u.categoria || "-"} / {u.subcategoria || "-"}</div>
-                        {u.completadoAt && <div><span className="font-semibold">Completado:</span> {new Date(u.completadoAt).toLocaleString()}</div>}
+                        {u.completadoAt && <div><span className="font-semibold">Completado:</span> {format(new Date(u.completadoAt), "PPP p", { locale: es })}</div>}
                         {u.completadoPor && <div><span className="font-semibold">Por:</span> {u.completadoPor}</div>}
                       </div>
                     )}
@@ -756,6 +758,9 @@ export default function UsosRepuestosPage() {
                   </div>
                   <div className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all max-h-24 overflow-y-auto">
                     {selectedUso.repuestoDescripcion ?? "Sin descripción"}
+                  </div>
+                  <div className="mt-1 text-[10px] text-muted-foreground text-right border-t pt-1">
+                    Solicitado: {format(new Date(selectedUso.createdAt), "dd MMM yyyy HH:mm", { locale: es })}
                   </div>
                 </div>
               </div>

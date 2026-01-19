@@ -88,7 +88,7 @@ export function EquipmentInspectionForm() {
 
   const filteredEquipos = useMemo(() => {
     const q = equipoQuery.trim().toLowerCase()
-    if (!q) return []
+    if (!q) return equipos.slice(0, 10)
     return equipos
       .filter(
         (e) =>

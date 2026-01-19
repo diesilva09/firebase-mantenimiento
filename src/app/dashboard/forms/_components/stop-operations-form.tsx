@@ -161,7 +161,7 @@ export function StopOperationsForm() {
     }
 
     toast({
-      title: "✅ Parada Guardada en BD",
+      title: "✅ Parada Guardada ",
       description: `Parada operativa registrada exitosamente`,
     });
     

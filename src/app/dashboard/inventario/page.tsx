@@ -1896,8 +1896,11 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
                 <Input
                   type="number"
                   min={1}
-                  value={usoCantidad}
-                  onChange={(e) => setUsoCantidad(Number(e.target.value) || 0)}
+                  value={usoCantidad === 0 ? "" : usoCantidad}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setUsoCantidad(val === "" ? 0 : Number(val))
+                  }}
                   className="mt-1 h-9 text-xs"
                 />
               </div>

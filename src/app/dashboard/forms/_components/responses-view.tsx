@@ -20,7 +20,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { MoreHorizontal, Search, RefreshCw, FileSpreadsheet, FileText, File, Download } from "lucide-react"
 import type { Submission, FormMetadata } from "@/lib/types"
-import { formatDate } from "@/lib/utils"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -28,6 +27,8 @@ import { getAllSubmissions, getFormsMetadata } from '@/lib/submissions-service'
 import { useEquipos } from '@/hooks/use-equipos'
 import { EquipmentDetailModal, type EquipmentDetail } from "@/components/equipment-detail-modal"
 import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
+import { format } from "date-fns"
+import { es } from "date-fns/locale"
 
 interface ResponsesViewProps {
   submissions?: Submission[]; // Hacer opcional para poder usar sin props
@@ -116,10 +117,10 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
     setIsEquipmentModalOpen(true)
   }
 
-  const handleExport = (submission: Submission, format: 'excel' | 'pdf' | 'word') => {
+  const handleExport = (submission: Submission, exportFormat: 'excel' | 'pdf' | 'word') => {
     const flatData = {
       'Formulario': submission.formTitle,
-      'Fecha': formatDate(submission.submittedAt),
+      'Fecha': format(new Date(submission.submittedAt), "dd/MM/yyyy HH:mm", { locale: es }),
       ...Object.entries(submission.data).reduce((acc, [key, value]) => {
         acc[key] = typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value ?? '');
         return acc;
@@ -130,22 +131,22 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
     const columns = Object.keys(flatData);
     const filename = `Respuesta_${submission.formTitle.replace(/\s+/g, '_')}_${new Date().getTime()}`;
 
-    if (format === 'excel') {
+    if (exportFormat === 'excel') {
       exportToExcel(dataToExport, filename);
-    } else if (format === 'pdf') {
+    } else if (exportFormat === 'pdf') {
       exportToPDF(dataToExport, columns, `Respuesta: ${submission.formTitle}`, filename);
-    } else if (format === 'word') {
+    } else if (exportFormat === 'word') {
       exportToWord(dataToExport, columns, `Respuesta: ${submission.formTitle}`, filename);
     }
   };
 
-  const handleBulkExport = (format: 'excel' | 'pdf' | 'word') => {
+  const handleBulkExport = (exportFormat: 'excel' | 'pdf' | 'word') => {
     if (filteredSubmissions.length === 0) return;
 
     const dataToExport = filteredSubmissions.map(submission => {
       const row: Record<string, string> = {
         'Formulario': submission.formTitle,
-        'Fecha': formatDate(submission.submittedAt),
+        'Fecha': format(new Date(submission.submittedAt), "dd/MM/yyyy HH:mm", { locale: es }),
       };
 
       Object.entries(submission.data).forEach(([key, value]) => {
@@ -162,11 +163,11 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
     const formTitle = selectedForm === 'all' ? 'Todas las Respuestas' : forms.find(f => f.slug === selectedForm)?.title || 'Respuestas';
     const filename = `Reporte_${formTitle.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`;
 
-    if (format === 'excel') {
+    if (exportFormat === 'excel') {
       exportToExcel(dataToExport, filename);
-    } else if (format === 'pdf') {
+    } else if (exportFormat === 'pdf') {
       exportToPDF(dataToExport, columns, `Reporte: ${formTitle}`, filename);
-    } else if (format === 'word') {
+    } else if (exportFormat === 'word') {
       exportToWord(dataToExport, columns, `Reporte: ${formTitle}`, filename);
     }
   };
@@ -250,9 +251,9 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
                     <TableRow key={submission.id} onClick={() => handleViewDetails(submission)} className="cursor-pointer">
                       <TableCell className="font-medium">
                         <div>{submission.formTitle}</div>
-                        <div className="text-sm text-muted-foreground sm:hidden">{formatDate(submission.submittedAt)}</div>
+                        <div className="text-sm text-muted-foreground sm:hidden">{format(new Date(submission.submittedAt), "dd/MM/yyyy", { locale: es })}</div>
                       </TableCell>
-                      <TableCell className="hidden sm:table-cell">{formatDate(submission.submittedAt)}</TableCell>
+                      <TableCell className="hidden sm:table-cell">{format(new Date(submission.submittedAt), "dd/MM/yyyy HH:mm", { locale: es })}</TableCell>
                       <TableCell className="hidden md:table-cell text-muted-foreground text-sm truncate max-w-sm">
                         {Object.entries(submission.data).slice(0, 2).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(', ')}...
                       </TableCell>
@@ -298,7 +299,7 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
           <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>Detalle de Respuesta</DialogTitle>
-              <DialogDescription>{selectedSubmission.formTitle} - {formatDate(selectedSubmission.submittedAt, "PPpp")}</DialogDescription>
+              <DialogDescription>{selectedSubmission.formTitle} - {format(new Date(selectedSubmission.submittedAt), "PPP p", { locale: es })}</DialogDescription>
             </DialogHeader>
             <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto">
               {Object.entries(selectedSubmission.data)

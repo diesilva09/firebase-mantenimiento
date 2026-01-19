@@ -29,6 +29,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Download, FileSpreadsheet, FileText, File, X, Maximize2 } from "lucide-react"
 import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
+import { format } from "date-fns"
+import { es } from "date-fns/locale"
 
 
 
@@ -93,6 +95,7 @@ export default function EquiposPage() {
   const [checkingAdmin, setCheckingAdmin] = useState(true)
 
   const { equipos, loading: equiposLoading, createEquipo, updateEquipo, deleteEquipo } = useEquipos()
+
   
   
 
@@ -692,7 +695,7 @@ export default function EquiposPage() {
     }
   }
 
-  const handleExport = (format: 'excel' | 'pdf' | 'word') => {
+  const handleExport = (exportFormat: 'excel' | 'pdf' | 'word') => {
     // Preparar los datos para exportación (aplanar objetos si es necesario)
     const dataToExport = equipos.map(e => ({
       'Código': e.codigo,
@@ -702,19 +705,20 @@ export default function EquiposPage() {
       'Marca': e.marca || '-',
       'Modelo': e.modelo || '-',
       'Estado': e.estado,
-    
+      'Fecha Adquisición': e.fechaAdquisicion ? e.fechaAdquisicion.split('-').reverse().join('/') : '-',
+      'Fecha Implementación': e.fechaImplementacion ? e.fechaImplementacion.split('-').reverse().join('/') : '-',
     }));
 
     
 
-    const columns = ['Código', 'Nombre', 'Área', 'Línea', 'Marca', 'Modelo', 'Estado'];
-    const filename = `Inventario_Equipos_${new Date().toISOString().split('T')[0]}`;
+    const columns = ['Código', 'Nombre', 'Área', 'Línea', 'Marca', 'Modelo', 'Estado', 'Fecha Adquisición', 'Fecha Implementación'];
+    const filename = `Inventario_Equipos_${format(new Date(), "dd-MM-yyyy", { locale: es })}`;
 
-    if (format === 'excel') {
+    if (exportFormat === 'excel') {
       exportToExcel(dataToExport, filename);
-    } else if (format === 'pdf') {
+    } else if (exportFormat === 'pdf') {
       exportToPDF(dataToExport, columns, 'Inventario de Equipos', filename);
-    } else if (format === 'word') {
+    } else if (exportFormat === 'word') {
       exportToWord(dataToExport, columns, 'Inventario de Equipos', filename);
     }
   };
@@ -817,7 +821,7 @@ export default function EquiposPage() {
       <div className="mt-6">
         {view === "form" ? (
           isAdmin ? (
-            <div className="rounded-md border bg-card p-3 sm:p-4">
+            <div className="rounded-md border bg-card p-3 sm:p-4 animate-in fade-in slide-in-from-bottom-8 duration-500">
               <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-4">
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

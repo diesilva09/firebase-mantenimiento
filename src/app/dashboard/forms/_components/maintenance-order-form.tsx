@@ -58,6 +58,23 @@ export function MaintenanceOrderForm() {
   const [showZonaSuggestions, setShowZonaSuggestions] = useState(false)
 
   useEffect(() => {
+    // 1. Estrategia Cache-First: Cargar inmediatamente del almacenamiento local si existe
+    try {
+      const raw = typeof window !== "undefined" ? localStorage.getItem("equipos") : null
+      if (raw) {
+        const parsed = JSON.parse(raw) as any[]
+        const mapped: EquipmentLookup[] = parsed
+          .filter((e) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
+          .map((e) => ({
+            codigo: e.codigo,
+            nombre: e.nombre,
+            area: e.area ?? null,
+            linea: e.linea ?? null,
+          }))
+        setEquipos(mapped)
+      }
+    } catch (e) { console.warn("Error leyendo caché local", e) }
+
     const fetchEquipos = async () => {
       try {
         const response = await fetch('/api/equipos')
@@ -75,9 +92,25 @@ export function MaintenanceOrderForm() {
           }))
 
         setEquipos(mapped)
+        
+        // Guardar en caché para la próxima vez
+        if (typeof window !== "undefined" && data?.data) {
+           // Guardamos la data cruda para compatibilidad con otros componentes
+           localStorage.setItem("equipos", JSON.stringify(data.data))
+        }
+        // Guardar en caché LIGERO (sin imágenes)
+        if (typeof window !== "undefined" && Array.isArray(equiposData)) {
+           const liteData = equiposData.map((e: any) => ({
+             ...e,
+             imagen_url: null,
+             imageDataUrl: null
+           }))
+           localStorage.setItem("equipos", JSON.stringify(liteData))
+        }
       } catch (e) {
         console.warn("No se pudo cargar la lista de equipos desde la API para autocompletar", e)
 
+        
         // Fallback a localStorage si la API falla
         try {
           const raw = typeof window !== "undefined" ? localStorage.getItem("equipos") : null
@@ -95,6 +128,8 @@ export function MaintenanceOrderForm() {
         } catch (localError) {
           console.warn("Fallback a localStorage para equipos también falló", localError)
         }
+        console.warn("Fallo carga de red, usando versión en caché si existe", e)
+        // No necesitamos fallback aquí porque ya cargamos el caché al principio
       }
     }
 
@@ -135,7 +170,7 @@ export function MaintenanceOrderForm() {
 
   const filteredEquipos = useMemo(() => {
     const q = equipoQuery.trim().toLowerCase()
-    if (!q) return []
+    if (!q) return equipos.slice(0, 10)
     return equipos.filter(
       (e) =>
         e.codigo.toLowerCase().includes(q) ||
