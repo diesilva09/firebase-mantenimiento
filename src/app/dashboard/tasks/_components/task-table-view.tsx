@@ -80,6 +80,16 @@ function TaskTable({
   onTaskClick: (task: Task) => void,
   loadingSpecsId?: string | null
 }) {
+  const getExecutedDisplay = (task: Task): { label: string; name?: string } => {
+    const executedName = task.executedBy?.name || ""
+    if (!executedName) return { label: "-" }
+    if (executedName.startsWith("Personal Externo - ")) {
+      const externalName = executedName.replace("Personal Externo - ", "").trim()
+      return { label: "Personal Externo", name: externalName }
+    }
+    return { label: executedName }
+  }
+
   if (tasks.length === 0) {
     return (
         <div className="text-center text-muted-foreground py-12">
@@ -136,24 +146,41 @@ function TaskTable({
                       {task.description}
                     </button>
                     <div className="text-sm text-muted-foreground">{task.area}</div>
+                    {task.frecuencia && task.frecuencia !== 'ninguna' && (
+                      <div className="mt-1">
+                        <Badge
+                          variant="secondary"
+                          className="text-[10px] uppercase tracking-wide bg-[#ff8500] text-white shadow-[0_0_12px_#ff8500] "
+                        >
+                          Frecuenciada
+                        </Badge>
+                      </div>
+                    )}
 
                     {/* Resumen compacto solo para pantallas pequeñas */}
                     <div className="mt-1 space-y-1 text-xs text-muted-foreground md:hidden">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium text-foreground">Estado:</span>
-                        <Badge variant="outline" className={statusBadgeStyles[task.status]}>
-                          {task.status === 'Futura' ? 'Próxima' : task.status}
-                        </Badge>
-                      </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1">
-                        <span>
-                          <span className="font-medium">Responsable:</span> {task.assignedTo.name}
-                        </span>
-                        <span>
-                          <span className="font-medium">Ejecutado por:</span>{" "}
-                          {task.executedBy ? task.executedBy.name : '-'}
-                        </span>
-                      </div>
+                      {(() => {
+                        const exec = getExecutedDisplay(task)
+                        return (
+                          <>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium text-foreground">Estado:</span>
+                              <Badge variant="outline" className={statusBadgeStyles[task.status]}>
+                                {task.status === 'Futura' ? 'Próxima' : task.status}
+                              </Badge>
+                            </div>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1">
+                              <span>
+                                <span className="font-medium">Responsable:</span> {task.assignedTo.name}
+                              </span>
+                              <span>
+                                <span className="font-medium">Ejecutado por:</span>{' '}
+                                {exec.label === '-' ? '-' : exec.name ? `${exec.label} (${exec.name})` : exec.label}
+                              </span>
+                            </div>
+                          </>
+                        )
+                      })()}
                       <div className="flex flex-wrap gap-x-4 gap-y-1">
                         <span>
                           <span className="font-medium">Fecha ejec.:</span>{" "}
@@ -175,11 +202,20 @@ function TaskTable({
                       <span>{task.assignedTo.name}</span>
                     </TableCell>
                     <TableCell className="hidden lg:table-cell">
-                      {task.executedBy ? (
-                        <span>{task.executedBy.name}</span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
+                      {(() => {
+                        const exec = getExecutedDisplay(task)
+                        if (exec.label === '-') {
+                          return <span className="text-muted-foreground">-</span>
+                        }
+                        return (
+                          <div className="flex flex-col">
+                            <span>{exec.label}</span>
+                            {exec.name && (
+                              <span className="text-xs text-muted-foreground">{exec.name}</span>
+                            )}
+                          </div>
+                        )
+                      })()}
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
                       {task.completionDate ? (

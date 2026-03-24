@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Calendar, List, RefreshCw, BarChart } from 'lucide-react';
+import { Calendar, List, RefreshCw, BarChart, Download, FileSpreadsheet, FileText, File } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useRouter, useSearchParams } from "next/navigation";
@@ -22,6 +22,15 @@ import { useToast } from '@/hooks/use-toast';
 import { useUser } from '@/firebase/auth/use-user';
 import { useNotificationsContext as useNotifications } from '@/context/notifications-context';
 import { useDashboardSearch, SearchSuggestion } from '@/context/dashboard-search-context';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
+import { format } from "date-fns"
+import { es } from "date-fns/locale"
 
 type ViewMode = 'calendar' | 'table' | 'analytics';
 const schedules: Schedule[] = ['Partes Altas', 'Equipo de Medición', 'Mantenimiento Locativo', 'Maquinaria'];
@@ -435,7 +444,7 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         const completionIso = new Date().toISOString();
         setTasks(prev => prev.map(task =>
           task.id === taskId
-            ? { ...task, status: 'Completada', workDone, executedBy, completionDate: completionIso, imageUrlBefore, imageUrlAfter, maintenanceType: tipoMantenimiento }
+            ? { ...task, status: 'Completada', workDone, executedBy, completionDate: completionIso, imageUrlBefore, imageUrlAfter, maintenanceType: tipoMantenimiento, sparesUsed: repuestos, observations: observaciones }
             : task
         ));
 
@@ -453,8 +462,13 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         }
 
         if (baseTask) {
+          const isFrecuenciada = (baseTask as any).frecuencia && (baseTask as any).frecuencia !== 'ninguna';
+          const completedTitlePrefix = isFrecuenciada
+            ? 'Tarea Completada (frecuenciada)'
+            : 'Tarea Completada';
+
           const baseNotif: Omit<Notification, "id" | "createdAt"> = {
-            title: `Tarea Completada: ${baseTask.code ?? ''} - ${baseTask.area ?? 'Área sin nombre'}`,
+            title: `${completedTitlePrefix}: ${baseTask.code ?? ''} - ${baseTask.area ?? 'Área sin nombre'}`,
             message: `Ejecutado por: ${executedBy.name}\nPrioridad: ${baseTask.priority ?? ''}\nTrabajo: ${workDone}`,
             type: "task_alert",
             severity: "success",
@@ -535,50 +549,47 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         }
 
         try {
+          const numericTaskId = parseInt(taskId, 10);
           const isEquipoSchedule = baseTask && (baseTask.schedule === 'Maquinaria' || baseTask.schedule === 'Equipo de Medición');
-          const numericTaskId = parseInt(taskId, 10);
-          if (baseTask && isEquipoSchedule && baseTask.code && !isNaN(numericTaskId)) {
-            await fetch('/api/equipos/historial', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                codigoEquipo: baseTask.code,
-                tareaId: numericTaskId,
-                fechaEvento: completionIso,
-                labor: workDone,
-                tipoMantenimiento: tipoMantenimiento,
-                repuestosUsados: repuestos,
-                observaciones: observaciones,
-                ejecutadoPor: executedBy.name,
-                creadoPor: userEmail || null,
-              }),
-            });
-          }
-        } catch (e) {
-          console.warn('No se pudo registrar la tarea en equipos_historial', e);
-        }
+          const isZonaSchedule = baseTask && (baseTask.schedule === 'Partes Altas' || baseTask.schedule === 'Mantenimiento Locativo');
 
-        try {
-          const numericTaskId = parseInt(taskId, 10);
           if (baseTask && baseTask.code && !isNaN(numericTaskId)) {
-            await fetch('/api/zonas/historial', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                codigoZona: baseTask.code,
-                tareaId: numericTaskId,
-                fechaEvento: completionIso,
-                labor: workDone,
-                tipoMantenimiento: tipoMantenimiento,
-                repuestosUsados: repuestos,
-                observaciones: observaciones,
-                ejecutadoPor: executedBy.name,
-                creadoPor: userEmail || null,
-              }),
-            });
+            if (isEquipoSchedule) {
+              await fetch('/api/equipos/historial', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  codigoEquipo: baseTask.code,
+                  tareaId: numericTaskId,
+                  fechaEvento: completionIso,
+                  labor: workDone,
+                  tipoMantenimiento: tipoMantenimiento,
+                  repuestosUsados: repuestos,
+                  observaciones: observaciones,
+                  ejecutadoPor: executedBy.name,
+                  creadoPor: userEmail || null,
+                }),
+              });
+            } else if (isZonaSchedule) {
+              await fetch('/api/zonas/historial', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  codigoZona: baseTask.code,
+                  tareaId: numericTaskId,
+                  fechaEvento: completionIso,
+                  labor: workDone,
+                  tipoMantenimiento: tipoMantenimiento,
+                  repuestosUsados: repuestos,
+                  observaciones: observaciones,
+                  ejecutadoPor: executedBy.name,
+                  creadoPor: userEmail || null,
+                }),
+              });
+            }
           }
         } catch (e) {
-          console.warn('No se pudo registrar la tarea en zonas_historial', e);
+          console.warn('No se pudo registrar la tarea en historial (equipos/zona)', e);
         }
 
         toast({
@@ -629,6 +640,36 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
     );
   }, [visibleTasks]);
 
+  const handleExport = (exportFormat: 'excel' | 'pdf' | 'word') => {
+    const dataToExport = visibleTasks.map(t => ({
+      'Código': t.code,
+      'Descripción': t.description,
+      'Área': t.area,
+      'Cronograma': t.schedule,
+      'Prioridad': t.priority,
+      'Estado': t.status,
+      'Responsable': t.assignedTo?.name || 'Sin asignar',
+      'Ejecutado por': t.executedBy?.name || '-',
+      'Fecha Programada': format(new Date(t.nextExecution), "PPP", { locale: es }),
+      'Fecha Completada': t.completionDate ? format(new Date(t.completionDate), "PPP", { locale: es }) : '-',
+      'Tipo Mantenimiento': (t as any).maintenanceType || '-',
+      'Trabajo Realizado': t.workDone || 'Sin registro',
+      'Repuestos Usados': (t as any).sparesUsed || '-',
+      'Observaciones': (t as any).observations || '-',
+    }));
+
+    const columns = ['Código', 'Descripción', 'Área', 'Cronograma', 'Prioridad', 'Estado', 'Responsable', 'Ejecutado por', 'Fecha Programada', 'Fecha Completada', 'Tipo Mantenimiento', 'Trabajo Realizado', 'Repuestos Usados', 'Observaciones'];
+    const filename = `Reporte_Tareas_${format(new Date(), "dd-MM-yyyy", { locale: es })}`;
+
+    if (exportFormat === 'excel') {
+      exportToExcel(dataToExport, filename);
+    } else if (exportFormat === 'pdf') {
+      exportToPDF(dataToExport, columns, 'Reporte de Tareas', filename);
+    } else if (exportFormat === 'word') {
+      exportToWord(dataToExport, columns, 'Reporte de Tareas', filename);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -638,8 +679,13 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
             {visibleTasks.filter(t => t.status !== 'Completada').length} tareas encontradas
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          <ToggleGroup type="single" value={viewMode} onValueChange={(value: ViewMode) => value && setViewMode(value)}>
+        <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch md:items-center gap-2 w-full md:w-auto">
+          <ToggleGroup
+            type="single"
+            value={viewMode}
+            onValueChange={(value: ViewMode) => value && setViewMode(value)}
+            className="w-full sm:w-auto justify-center sm:justify-start"
+          >
             <ToggleGroupItem value="calendar" aria-label="Vista de calendario">
               <Calendar className="h-4 w-4" />
             </ToggleGroupItem>
@@ -650,12 +696,42 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
               <BarChart className="h-4 w-4" />
             </ToggleGroupItem>
           </ToggleGroup>
-          <Button variant="outline" onClick={() => loadTasks(selectedSchedule)} disabled={isLoading} className="flex-1 md:flex-none">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                className="w-full sm:w-auto flex-1 md:flex-none gap-2 justify-center"
+              >
+                <Download className="h-4 w-4" />
+                Exportar
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExport('excel')}>
+                <FileSpreadsheet className="mr-2 h-4 w-4 text-green-600" /> Excel
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                <FileText className="mr-2 h-4 w-4 text-red-600" /> PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('word')}>
+                <File className="mr-2 h-4 w-4 text-blue-600" /> Word
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            variant="outline"
+            onClick={() => loadTasks(selectedSchedule)}
+            disabled={isLoading}
+            className="w-full sm:w-auto flex-1 md:flex-none justify-center"
+          >
             <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
             Actualizar
           </Button>
           {isAdmin && (
-            <Button onClick={() => setIsAddTaskOpen(true)} className="flex-1 md:flex-none">
+            <Button
+              onClick={() => setIsAddTaskOpen(true)}
+              className="w-full sm:w-auto flex-1 md:flex-none justify-center"
+            >
               Agregar Labor
             </Button>
           )}
@@ -665,14 +741,22 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
       {viewMode === 'calendar' ? (
         <Card>
           <CardContent className="p-0 sm:p-6">
-            <Tabs defaultValue="Maquinaria" value={selectedSchedule} onValueChange={(value) => setSelectedSchedule(value as Schedule)}>
+            <Tabs
+              defaultValue="Maquinaria"
+              value={selectedSchedule}
+              onValueChange={(value) => setSelectedSchedule(value as Schedule)}
+            >
               <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 h-auto gap-1 sm:gap-0">
                 {schedules.map(schedule => {
                   const totalNoCompletadas = (tasksBySchedule[schedule] || []).filter(t => t.status !== 'Completada').length;
                   return (
-                    <TabsTrigger key={schedule} value={schedule} className="w-full">
+                    <TabsTrigger
+                      key={schedule}
+                      value={schedule}
+                      className="w-full text-xs sm:text-sm px-2 py-1 whitespace-normal"
+                    >
                       {schedule}
-                      <span className="ml-2 bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full text-xs">
+                      <span className="ml-2 bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full text-[10px] sm:text-xs">
                         {totalNoCompletadas}
                       </span>
                     </TabsTrigger>

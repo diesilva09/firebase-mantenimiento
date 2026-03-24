@@ -49,6 +49,9 @@ export function TaskDetailsDialog({
   onOpenSpecs 
 }: TaskDetailsDialogProps) {
   const [enlargedImage, setEnlargedImage] = useState<{ src: string; label: string } | null>(null)
+  const executedName = task.executedBy?.name || ""
+  const isExternal = executedName.startsWith("Personal Externo - ")
+  const externalDisplayName = isExternal ? executedName.replace("Personal Externo - ", "").trim() : executedName
   
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -80,12 +83,18 @@ export function TaskDetailsDialog({
                 <span className="text-muted-foreground">Responsable:</span>
                 <span className="font-medium">{task.assignedTo.name}</span>
             </div>
-             {task.executedBy && (
-               <div className="flex justify-between">
-                    <span className="text-muted-foreground">Ejecutado por:</span>
-                    <span className="font-medium">{task.executedBy.name}</span>
-                </div>
-            )}
+            {task.executedBy && (
+              <div className="flex justify-between">
+                   <span className="text-muted-foreground">Ejecutado por:</span>
+                   <span className="font-medium">
+                     {isExternal ? (
+                       <>Personal Externo ({externalDisplayName})</>
+                     ) : (
+                       executedName
+                     )}
+                   </span>
+               </div>
+           )}
             <div className="flex justify-between">
                 <span className="text-muted-foreground">Próx. Ejecución:</span>
                 <span className="font-medium">{format(new Date(task.nextExecution), "PPP", { locale: es })}</span>
@@ -101,6 +110,28 @@ export function TaskDetailsDialog({
                 <span className="text-muted-foreground">Trabajo Realizado:</span>
                 <p className="font-medium bg-muted/50 p-2 rounded-md whitespace-pre-wrap break-all">
                   {task.workDone}
+                </p>
+              </div>
+            )}
+            {task.status === 'Completada' && (task as any).maintenanceType && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Tipo Mantenimiento:</span>
+                <span className="font-medium">{(task as any).maintenanceType}</span>
+              </div>
+            )}
+            {task.status === 'Completada' && (task as any).sparesUsed && (
+              <div className="space-y-1">
+                <span className="text-muted-foreground">Repuestos Usados:</span>
+                <p className="font-medium bg-muted/50 p-2 rounded-md whitespace-pre-wrap break-all">
+                  {(task as any).sparesUsed}
+                </p>
+              </div>
+            )}
+            {task.status === 'Completada' && (task as any).observations && (
+              <div className="space-y-1">
+                <span className="text-muted-foreground">Observaciones:</span>
+                <p className="font-medium bg-muted/50 p-2 rounded-md whitespace-pre-wrap break-all">
+                  {(task as any).observations}
                 </p>
               </div>
             )}

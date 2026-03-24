@@ -53,6 +53,8 @@ export function mapDatabaseTaskToFrontend(dbTask: any, users: User[]): Task {
     workDone: dbTask.trabajo_realizado,
     imageUrlBefore: dbTask.imagen_antes,
     imageUrlAfter: dbTask.imagen_despues,
+    frecuencia: dbTask.frecuencia || 'ninguna',
+    intervalo: dbTask.intervalo ?? null,
   }
 }
 

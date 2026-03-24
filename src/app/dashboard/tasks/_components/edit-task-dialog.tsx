@@ -53,6 +53,12 @@ const taskSchema = z
       required_error: "La fecha de ejecución es requerida.",
     }),
     hasAlert: z.boolean().default(false),
+    frecuencia: z.enum(['ninguna', 'diaria', 'semanal', 'mensual', 'trimestral', 'personalizada']).default('ninguna'),
+    intervalo: z
+      .number()
+      .int()
+      .positive("Debe ser un número mayor que cero")
+      .optional(),
   })
   .refine(
     (data) => (data.assignedTo === 'otro' ? Boolean(data.customAssignedTo?.trim()) : true),
@@ -96,6 +102,8 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
       customAssignedTo: "",
       nextExecution: new Date(),
       hasAlert: false,
+      frecuencia: 'ninguna',
+      intervalo: undefined,
     },
   })
 
@@ -149,16 +157,58 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
 
   useEffect(() => {
     if (isOpen && task) {
+      // Determinar cómo mapear el responsable al formulario basándonos en ID y NOMBRE.
+      // Objetivo: si es uno de la lista fija, dejarlo seleccionado; solo usar "otro"
+      // cuando realmente es un responsable personalizado.
+      const fixedTechnicians: { id: string; name: string }[] = [
+        { id: 'luis-bohorquez', name: 'Luis Bohorquez' },
+        { id: 'duvan-guevara', name: 'Duvan Guevara' },
+        { id: 'juan-david-caro', name: 'Juan David Caro' },
+        { id: 'sergio-rubiano', name: 'Sergio Rubiano' },
+        { id: 'javier-morales', name: 'Javier Morales' },
+      ]
+
+      const currentId = (task.assignedTo.id || '').trim()
+      const currentName = (task.assignedTo.name || '').trim()
+      const currentNameLower = currentName.toLowerCase()
+
+      // 1) Intentar emparejar por id exacto
+      let matchFijo = fixedTechnicians.find((t) => t.id === currentId)
+
+      // 2) Si no coincide por id, intentar por nombre (por ejemplo cuando
+      // en BD quedó guardado el id como texto del nombre o similar).
+      if (!matchFijo) {
+        matchFijo = fixedTechnicians.find(
+          (t) => t.name.trim().toLowerCase() === currentNameLower || t.id === currentNameLower,
+        )
+      }
+
+      let assignedToValue: string
+      let customAssignedToValue: string
+
+      if (matchFijo) {
+        // Coincide con uno de los técnicos de la lista: seleccionar ese id
+        assignedToValue = matchFijo.id
+        customAssignedToValue = ''
+      } else {
+        // No coincide con ninguno de la lista: tratar como "Otro técnico"
+        assignedToValue = 'otro'
+        customAssignedToValue = currentName
+      }
+
       form.reset({
         code: task.code,
         area: task.area,
         description: task.description,
         schedule: task.schedule,
         priority: task.priority,
-        assignedTo: task.assignedTo.id,
-        customAssignedTo: task.assignedTo.id === 'otro' ? task.assignedTo.name : "",
+        assignedTo: assignedToValue,
+        customAssignedTo: customAssignedToValue,
+
         nextExecution: new Date(task.nextExecution),
         hasAlert: task.hasAlert || false,
+        frecuencia: task.frecuencia ?? 'ninguna',
+        intervalo: task.intervalo ?? undefined,
       })
       setCodeQuery(task.code)
       setAreaQuery(task.area)
@@ -234,6 +284,8 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
           fecha_programada: data.nextExecution.toISOString(),
           responsable: data.assignedTo === 'otro' ? data.customAssignedTo : data.assignedTo,
           tiene_alerta: data.hasAlert,
+          frecuencia: data.frecuencia,
+          intervalo: data.frecuencia === 'ninguna' ? null : (data.intervalo ?? 1),
         }
 
         const response = await fetch('/api/tareas', {
@@ -275,6 +327,8 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
           assignedTo: finalAssignedTo,
           nextExecution: data.nextExecution.toISOString(),
           hasAlert: data.hasAlert,
+          frecuencia: data.frecuencia,
+          intervalo: data.frecuencia === 'ninguna' ? null : (data.intervalo ?? 1),
         }
 
         onEditTask(updatedTask)
@@ -303,7 +357,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-4 py-4 max-h-[80vh] overflow-y-auto px-1"
+            className="space-y-4 py-4 px-1"
           >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField
@@ -475,6 +529,58 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
                 )}
               />
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="frecuencia"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Frecuencia</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Sin repetición" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="ninguna">Sin repetición</SelectItem>
+                        <SelectItem value="diaria">Diaria</SelectItem>
+                        <SelectItem value="semanal">Semanal</SelectItem>
+                        <SelectItem value="mensual">Mensual</SelectItem>
+                        <SelectItem value="trimestral">Trimestral</SelectItem>
+                        <SelectItem value="personalizada">Personalizada (cada X días)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              {form.watch('frecuencia') !== 'ninguna' && (
+                <FormField
+                  control={form.control}
+                  name="intervalo"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Intervalo</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min={1}
+                          placeholder="1"
+                          value={field.value ?? ''}
+                          onChange={(e) => {
+                            const value = e.target.value
+                            field.onChange(value ? Number(value) : undefined)
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField
                 control={form.control}

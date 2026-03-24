@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useCallback, useRef } from "react"
+import type React from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
@@ -60,6 +61,12 @@ const taskSchema = z
     reminderType: z.enum(['predefined', 'custom']).optional(),
     predefinedReminders: z.array(z.boolean()).optional(),
     customReminderDate: z.date().optional(),
+    frecuencia: z.enum(['ninguna', 'diaria', 'semanal', 'mensual', 'trimestral', 'personalizada']).default('ninguna'),
+    intervalo: z
+      .number()
+      .int()
+      .positive("Debe ser un número mayor que cero")
+      .optional(),
   })
   .refine(
     (data) => (data.assignedTo === 'otro' ? Boolean(data.customAssignedTo?.trim()) : true),
@@ -108,6 +115,8 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
       reminderType: undefined,
       predefinedReminders: [true, true, true], // Por defecto, todos los recordatorios predefinidos están activados
       customReminderDate: undefined,
+      frecuencia: 'ninguna',
+      intervalo: undefined,
     },
   })
 
@@ -120,6 +129,93 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
   const [areaQuery, setAreaQuery] = useState("")
   const [showCodeSuggestions, setShowCodeSuggestions] = useState(false)
   const [showAreaSuggestions, setShowAreaSuggestions] = useState(false)
+
+  // Estado para autosugerencias de descripción
+  const [descriptionSuggestion, setDescriptionSuggestion] = useState("")
+  const descriptionDebounceRef = useRef<number | null>(null)
+
+  const fetchDescriptionSuggestion = useCallback(async (value: string) => {
+    const query = value.trim()
+    if (!query || query.length < 3) {
+      setDescriptionSuggestion("")
+      return
+    }
+
+    try {
+      const res = await fetch(`/api/tareas/sugerencias?query=${encodeURIComponent(query)}`)
+      if (!res.ok) {
+        setDescriptionSuggestion("")
+        return
+      }
+      const json = await res.json().catch(() => ({ data: [] }))
+      const list: string[] = Array.isArray(json?.data) ? json.data : []
+      const match = list.find((item) =>
+        item.toLowerCase().startsWith(query.toLowerCase()),
+      )
+      if (match && match.length > query.length) {
+        setDescriptionSuggestion(match)
+      } else {
+        setDescriptionSuggestion("")
+      }
+    } catch {
+      setDescriptionSuggestion("")
+    }
+  }, [])
+
+  // Limpiar sugerencias cuando se cierra el modal
+  useEffect(() => {
+    if (!isOpen) {
+      setDescriptionSuggestion("")
+      if (descriptionDebounceRef.current !== null) {
+        window.clearTimeout(descriptionDebounceRef.current)
+        descriptionDebounceRef.current = null
+      }
+    }
+  }, [isOpen])
+
+  const handleDescriptionChange = useCallback(
+    (value: string) => {
+      if (descriptionDebounceRef.current !== null) {
+        window.clearTimeout(descriptionDebounceRef.current)
+      }
+      descriptionDebounceRef.current = window.setTimeout(() => {
+        fetchDescriptionSuggestion(value)
+      }, 250)
+    },
+    [fetchDescriptionSuggestion],
+  )
+
+  const handleDescriptionKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>, currentValue: string) => {
+      if (e.key === 'Tab' && !e.shiftKey && descriptionSuggestion) {
+        const base = currentValue ?? ''
+        if (
+          base &&
+          descriptionSuggestion.toLowerCase().startsWith(base.toLowerCase()) &&
+          descriptionSuggestion.length > base.length
+        ) {
+          e.preventDefault()
+          form.setValue('description', descriptionSuggestion)
+          setDescriptionSuggestion('')
+        }
+      }
+    },
+    [descriptionSuggestion, form],
+  )
+
+  const applyDescriptionSuggestion = useCallback(() => {
+    const currentValue = form.getValues('description') ?? ''
+    if (
+      !descriptionSuggestion ||
+      !currentValue ||
+      !descriptionSuggestion.toLowerCase().startsWith(currentValue.toLowerCase()) ||
+      descriptionSuggestion.length <= currentValue.length
+    ) {
+      return
+    }
+    form.setValue('description', descriptionSuggestion)
+    setDescriptionSuggestion('')
+  }, [descriptionSuggestion, form])
 
   useEffect(() => {
   const fetchEquipos = async () => {
@@ -282,7 +378,9 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
       prioridad: data.priority,
       fecha_programada: data.nextExecution.toISOString(),
       responsable: responsableName,
-      tiene_alerta: data.hasAlert
+      tiene_alerta: data.hasAlert,
+      frecuencia: data.frecuencia,
+      intervalo: data.frecuencia === 'ninguna' ? null : (data.intervalo ?? 1),
     };
 
     console.log('Enviando tarea a la BD:', tareaData);
@@ -576,22 +674,115 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                 )}
               />
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="frecuencia"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Frecuencia</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Sin repetición" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="ninguna">Sin repetición</SelectItem>
+                        <SelectItem value="diaria">Diaria</SelectItem>
+                        <SelectItem value="semanal">Semanal</SelectItem>
+                        <SelectItem value="mensual">Mensual</SelectItem>
+                        <SelectItem value="trimestral">Trimestral</SelectItem>
+                        <SelectItem value="personalizada">Personalizada (cada X días)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              {form.watch('frecuencia') !== 'ninguna' && (
+                <FormField
+                  control={form.control}
+                  name="intervalo"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Intervalo</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min={1}
+                          placeholder="1"
+                          value={field.value ?? ''}
+                          onChange={(e) => {
+                            const value = e.target.value
+                            field.onChange(value ? Number(value) : undefined)
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+            </div>
             <FormField
               control={form.control}
               name="description"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Descripción</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      placeholder="Mantenimiento preventivo trimestral"
-                      className="min-h-[40px] resize-y w-full sm:w-1/2"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
+              render={({ field }) => {
+                const currentValue = field.value ?? ''
+                const showSuggestion =
+                  descriptionSuggestion &&
+                  currentValue &&
+                  descriptionSuggestion.toLowerCase().startsWith(currentValue.toLowerCase()) &&
+                  descriptionSuggestion.length > currentValue.length
+
+                const remaining = showSuggestion
+                  ? descriptionSuggestion.slice(currentValue.length)
+                  : ''
+
+                return (
+                  <FormItem>
+                    <FormLabel>Descripción</FormLabel>
+                    <FormControl>
+                      <div className="w-full space-y-1">
+                        <div className="relative w-full">
+                          {/* Ghost text overlay */}
+                          {showSuggestion && (
+                            <div className="pointer-events-none absolute inset-0 whitespace-pre-wrap break-words text-sm text-muted-foreground/60 p-2">
+                              <span className="invisible">{currentValue}</span>
+                              <span>{remaining}</span>
+                            </div>
+                          )}
+                          <Textarea
+                            placeholder="Mantenimiento preventivo trimestral"
+                            className="min-h-[40px] resize-y w-full"
+                            value={currentValue}
+                            onChange={(e) => {
+                              field.onChange(e)
+                              handleDescriptionChange(e.target.value)
+                            }}
+                            onKeyDown={(e) => handleDescriptionKeyDown(e, currentValue)}
+                          />
+                        </div>
+                        {showSuggestion && (
+                          <div className="flex justify-end">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="xs"
+                              className="text-xs"
+                              onClick={applyDescriptionSuggestion}
+                            >
+                              Aplicar sugerencia
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )
+              }}
             />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField
@@ -935,8 +1126,12 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
               </div>
             )}
             <DialogFooter className="pt-4">
-              <Button type="button" variant="ghost" onClick={() => setIsOpen(false)}>Cancelar</Button>
-              <Button type="submit">Guardar Tarea</Button>
+              <Button type="button" variant="ghost" onClick={() => setIsOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting ? 'Guardando...' : 'Guardar Tarea'}
+              </Button>
             </DialogFooter>
           </form>
         </Form>

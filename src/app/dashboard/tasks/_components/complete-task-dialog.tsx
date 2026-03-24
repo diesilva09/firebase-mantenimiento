@@ -59,7 +59,11 @@ const completeSchema = z
       ),
   })
   .refine(
-    (data) => (data.executedById === "otro" ? Boolean(data.customExecutedBy?.trim()) : true),
+    (data) => (
+      data.executedById === "otro" || data.executedById === "personal-externo"
+        ? Boolean(data.customExecutedBy?.trim())
+        : true
+    ),
     {
       path: ["customExecutedBy"],
       message: "Ingresa el nombre del ejecutor.",
@@ -137,8 +141,11 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
   function onSubmit(data: CompleteFormValues) {
     let executedByUser: User;
 
-    if (data.executedById === "otro" && data.customExecutedBy) {
-      const name = data.customExecutedBy.trim();
+    if ((data.executedById === "otro" || data.executedById === "personal-externo") && data.customExecutedBy) {
+      const baseName = data.customExecutedBy.trim();
+      const name = data.executedById === "personal-externo"
+        ? `Personal Externo - ${baseName}`
+        : baseName;
       executedByUser = {
         id: `custom-${Date.now()}`,
         name,
@@ -224,13 +231,14 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
                         <SelectItem value="sergio-rubiano">Sergio Rubiano</SelectItem>
                         <SelectItem value="javier-morales">Javier Morales</SelectItem>
                         <SelectItem value="otro">Otro técnico</SelectItem>
+                        <SelectItem value="personal-externo">Personal Externo</SelectItem>
                        </SelectContent>
                     </Select>
                   <FormMessage />
                 </FormItem>
               )}
             />
-            {form.watch("executedById") === "otro" && (
+            {(form.watch("executedById") === "otro" || form.watch("executedById") === "personal-externo") && (
               <FormField
                 control={form.control}
                 name="customExecutedBy"
@@ -383,8 +391,12 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
               />
             </div>
             <DialogFooter className="pt-4">
-              <Button type="button" variant="ghost" onClick={() => setIsOpen(false)}>Cancelar</Button>
-              <Button type="submit">Confirmar y Completar</Button>
+              <Button type="button" variant="ghost" onClick={() => setIsOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting ? 'Guardando...' : 'Confirmar y Completar'}
+              </Button>
             </DialogFooter>
           </form>
         </Form>

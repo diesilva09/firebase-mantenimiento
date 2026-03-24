@@ -487,8 +487,8 @@ export function ZonasPageClient() {
                 <thead className="bg-blue-50 text-blue-700">
                   <tr>
                     <th className="px-3 py-2 text-left">Área</th>
-                    <th className="px-3 py-2 text-left">Código</th>
-                    <th className="px-3 py-2 text-left">Nombre</th>
+                    <th className="px-3 py-2 text-left">Código de estructura/zona</th>
+                    <th className="px-3 py-2 text-left">Nombre de la zona/estructura</th>
                     {isAdmin && <th className="px-3 py-2 text-right">Acciones</th>}
                   </tr>
                 </thead>

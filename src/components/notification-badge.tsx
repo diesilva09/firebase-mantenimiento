@@ -48,6 +48,13 @@ const getStatusBadgeClass = (status?: Notification['status']): string => {
   return "bg-muted text-muted-foreground border";
 };
 
+// Determina si una notificación corresponde a una tarea frecuenciada
+const isFrecuenciadaNotification = (notification: Notification): boolean => {
+  if (!notification.title) return false;
+  const title = notification.title.toLowerCase();
+  return title.includes('frecuenciada');
+};
+
 export function NotificationBadge() {
   const router = useRouter()
   const {
@@ -167,8 +174,16 @@ export function NotificationBadge() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2 mb-1">
-                <span className="font-medium text-sm whitespace-pre-wrap break-words">
+                <span className="font-medium text-sm whitespace-pre-wrap break-words flex items-center gap-2">
                   {notification.title}
+                  {isFrecuenciadaNotification(notification) && (
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] uppercase tracking-wide bg-[#ff8500] text-white shadow-[0_0_8px_#ff8500]"
+                    >
+                      Frecuenciada
+                    </Badge>
+                  )}
                 </span>
                 {notification.status && (
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${getStatusBadgeClass(notification.status)}`}>

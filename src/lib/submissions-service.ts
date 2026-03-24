@@ -4,14 +4,11 @@ import { Submission, FormMetadata } from './types';
 // 1. Ordenes de Mantenimiento
 async function fetchOrdenesMantenimiento(): Promise<Submission[]> {
   try {
-    console.log('🔄 [fetchOrdenesMantenimiento] Llamando endpoint...');
     const response = await fetch('/api/ordenes-mantenimiento');
     if (!response.ok) throw new Error('Error fetching ordenes mantenimiento');
     const result = await response.json();
-    console.log('📊 [fetchOrdenesMantenimiento] Resultado raw:', result);
     const data = result.data;
-    console.log(`✅ [fetchOrdenesMantenimiento] Datos recibidos: ${data?.length || 0} registros`);
-    
+
     return data.map((item: any) => ({
       id: `om-${item.id}`,
       form: 'ordenes-mantenimiento',
@@ -38,18 +35,14 @@ async function fetchOrdenesMantenimiento(): Promise<Submission[]> {
   }
 }
 
-
 // 2. Paradas Operativas
 async function fetchParadasOperativas(): Promise<Submission[]> {
   try {
-    console.log('🔄 [fetchParadasOperativas] Llamando endpoint...');
     const response = await fetch('/api/paradas-operativas');
     if (!response.ok) throw new Error('Error fetching paradas operativas');
     const result = await response.json();
-    console.log('📊 [fetchParadasOperativas] Resultado raw:', result);
     const data = result.data;
-    console.log(`✅ [fetchParadasOperativas] Datos recibidos: ${data?.length || 0} registros`);
-    
+
     return data.map((item: any) => ({
       id: `po-${item.id}`,
       form: 'paradas-operativas',
@@ -77,14 +70,11 @@ async function fetchParadasOperativas(): Promise<Submission[]> {
 // 3. Tareas de Cronograma
 async function fetchMaintenanceMinutes(): Promise<Submission[]> {
   try {
-    console.log('🔄 [fetchMaintenanceMinutes] Llamando endpoint...');
     const response = await fetch('/api/maintenance-minutes');
     if (!response.ok) throw new Error('Error fetching maintenance minutes');
     const result = await response.json();
-    console.log('📊 [fetchMaintenanceMinutes] Resultado raw:', result);
     const data = result.data;
-    console.log(`✅ [fetchMaintenanceMinutes] Datos recibidos: ${data?.length || 0} registros`);
-    
+
     return data.map((item: any) => ({
       id: `mm-${item.id}`,
       form: 'maintenance-minutes',
@@ -111,14 +101,11 @@ async function fetchMaintenanceMinutes(): Promise<Submission[]> {
 // 4. Consumos de Servicios
 async function fetchConsumosServicios(): Promise<Submission[]> {
   try {
-    console.log('🔄 [fetchConsumosServicios] Llamando endpoint...');
     const response = await fetch('/api/consumos-servicios');
     if (!response.ok) throw new Error('Error fetching consumos servicios');
     const result = await response.json();
-    console.log('📊 [fetchConsumosServicios] Resultado raw:', result);
     const data = result.data;
-    console.log(`✅ [fetchConsumosServicios] Datos recibidos: ${data?.length || 0} registros`);
-    
+
     return data.map((item: any) => ({
       id: `cs-${item.id}`,
       form: 'consumos-servicios',
@@ -150,14 +137,11 @@ async function fetchConsumosServicios(): Promise<Submission[]> {
 // 5. Equipment Inspections
 async function fetchEquipmentInspections(): Promise<Submission[]> {
   try {
-    console.log('🔄 [fetchEquipmentInspections] Llamando endpoint...');
     const response = await fetch('/api/equipment-inspections');
     if (!response.ok) throw new Error('Error fetching equipment inspections');
     const result = await response.json();
-    console.log('📊 [fetchEquipmentInspections] Resultado raw:', result);
     const data = result.data;
-    console.log(`✅ [fetchEquipmentInspections] Datos recibidos: ${data?.length || 0} registros`);
-    
+
     return data.map((item: any) => ({
       id: `ei-${item.id}`,
       form: 'equipment-inspections',
@@ -180,14 +164,11 @@ async function fetchEquipmentInspections(): Promise<Submission[]> {
 // 6. Spares Requests
 async function fetchSparesRequests(): Promise<Submission[]> {
   try {
-    console.log('🔄 [fetchSparesRequests] Llamando endpoint...');
     const response = await fetch('/api/spares-requests');
     if (!response.ok) throw new Error('Error fetching spares requests');
     const result = await response.json();
-    console.log('📊 [fetchSparesRequests] Resultado raw:', result);
     const data = result.data;
-    console.log(`✅ [fetchSparesRequests] Datos recibidos: ${data?.length || 0} registros`);
-    
+
     return data.map((item: any) => ({
       id: `sr-${item.id}`,
       form: 'spares-requests',
@@ -210,8 +191,6 @@ async function fetchSparesRequests(): Promise<Submission[]> {
 // Función principal para obtener todas las submissions
 export async function getAllSubmissions(): Promise<Submission[]> {
   try {
-    console.log('🔄 [getAllSubmissions] Iniciando carga de submissions...');
-    
     const responses = await Promise.all([
       fetchOrdenesMantenimiento(),
       fetchParadasOperativas(),
@@ -221,18 +200,11 @@ export async function getAllSubmissions(): Promise<Submission[]> {
       fetchMaintenanceMinutes(),
     ]);
 
-    console.log('📊 [getAllSubmissions] Respuestas recibidas:', responses);
-    
     const allSubmissions = responses.flat();
-    console.log('📈 [getAllSubmissions] Total submissions:', allSubmissions.length);
-    
     const sorted = allSubmissions.sort((a, b) => 
       new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
     );
-    
-    console.log('✅ [getAllSubmissions] Proceso completado');
     return sorted;
-    
   } catch (error) {
     console.error('❌ [getAllSubmissions] Error:', error);
     return [];
