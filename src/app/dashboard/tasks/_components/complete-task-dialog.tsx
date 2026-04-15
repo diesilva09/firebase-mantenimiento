@@ -43,6 +43,7 @@ const completeSchema = z
     tipoMantenimiento: z.string().min(1, "Selecciona el tipo de mantenimiento."),
     repuestos: z.string().optional().default(""),
     observaciones: z.string().optional().default(""),
+    executionDate: z.date({ required_error: "Selecciona la fecha de ejecución." }),
     imageBefore: z.any()
       .optional()
       .refine((file) => !file || file.size <= MAX_FILE_SIZE, `El tamaño máximo es 4MB.`)
@@ -86,7 +87,8 @@ interface CompleteTaskDialogProps {
     tipoMantenimiento?: string,
     repuestos?: string,
     observaciones?: string,
-  ) => void
+    executionDateIso?: string,
+  ) => Promise<boolean>
 }
 
 export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete }: CompleteTaskDialogProps) {
@@ -104,6 +106,7 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
       tipoMantenimiento: "",
       repuestos: "",
       observaciones: "",
+      executionDate: new Date(),
     },
   })
 
@@ -133,12 +136,13 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
       observaciones: "",
       imageBefore: undefined,
       imageAfter: undefined,
+      executionDate: new Date(),
     });
     setPreviewBefore(null);
     setPreviewAfter(null);
   }
 
-  function onSubmit(data: CompleteFormValues) {
+  async function onSubmit(data: CompleteFormValues) {
     let executedByUser: User;
 
     if ((data.executedById === "otro" || data.executedById === "personal-externo") && data.customExecutedBy) {
@@ -153,7 +157,7 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
       };
     } else {
       const selectedUser = users.find(u => u.id === data.executedById);
-      
+
       if (selectedUser) {
         executedByUser = {
           id: selectedUser.id,
@@ -162,14 +166,16 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
         };
       } else {
         const techNameMap: Record<string, string> = {
-          "luis-bohorquez": "Luis Bohorquez",
-          "duvan-guevara": "Duvan Guevara",
-          "juan-david-caro": "Juan David Caro",
-          "sergio-rubiano": "Sergio Rubiano",
-          "javier-morales": "Javier Morales",
+          "luis bohorquez": "Luis Bohorquez",
+          "duvan guevara": "Duvan Guevara",
+          "juan david caro": "Juan David Caro",
+          "sergio rubiano": "Sergio Rubiano",
+          "javier morales": "Javier Morales",
         };
-        const name = techNameMap[data.executedById];
-        if (!name) return;
+
+        const mappedName = techNameMap[data.executedById];
+        const name = mappedName || data.executedById;
+
         executedByUser = {
           id: data.executedById,
           name,
@@ -178,7 +184,9 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
       }
     }
 
-    onComplete(
+    const executionIso = data.executionDate.toISOString();
+
+    const success = await onComplete(
       task.id,
       data.workDone,
       executedByUser,
@@ -187,13 +195,22 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
       data.tipoMantenimiento,
       data.repuestos ?? "",
       data.observaciones ?? "",
+      executionIso,
     )
-    toast({
-      title: "Tarea Completada",
-      description: `La tarea ${task.code} ha sido marcada como completada.`,
-    })
-    setIsOpen(false)
-    resetDialog()
+    if (success) {
+      toast({
+        title: "Tarea Completada",
+        description: `La tarea ${task.code} ha sido marcada como completada.`,
+      })
+      setIsOpen(false)
+      resetDialog()
+    } else {
+      toast({
+        title: "No se pudo completar la tarea",
+        description: "Ocurrió un error al guardar los datos. Revisa el texto ingresado e inténtalo nuevamente.",
+        variant: "destructive",
+      })
+    }
   }
 
   return (
@@ -214,6 +231,26 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 p-1">
             <FormField
               control={form.control}
+              name="executionDate"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Fecha de ejecución</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="date"
+                      value={field.value ? new Date(field.value).toISOString().slice(0, 10) : ""}
+                      onChange={(e) => {
+                        const date = e.target.value ? new Date(e.target.value) : new Date();
+                        field.onChange(date);
+                      }}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
               name="executedById"
               render={({ field }) => (
                 <FormItem>
@@ -225,11 +262,13 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="luis-bohorquez">Luis Bohorquez</SelectItem>
-                        <SelectItem value="duvan-guevara">Duvan Guevara</SelectItem>
-                        <SelectItem value="juan-david-caro">Juan David Caro</SelectItem>
-                        <SelectItem value="sergio-rubiano">Sergio Rubiano</SelectItem>
-                        <SelectItem value="javier-morales">Javier Morales</SelectItem>
+                        <SelectItem value="luis bohorquez">Luis Bohorquez</SelectItem>
+                        <SelectItem value="duvan guevara">Duvan Guevara</SelectItem>
+                        <SelectItem value="juan david caro">Juan David Caro</SelectItem>
+                        <SelectItem value="sergio rubiano">Sergio Rubiano</SelectItem>
+                        <SelectItem value="javier morales">Javier Morales</SelectItem>
+                        <SelectItem value="Andres">Andres</SelectItem>
+                        <SelectItem value="Robayo">Robayo</SelectItem>
                         <SelectItem value="otro">Otro técnico</SelectItem>
                         <SelectItem value="personal-externo">Personal Externo</SelectItem>
                        </SelectContent>

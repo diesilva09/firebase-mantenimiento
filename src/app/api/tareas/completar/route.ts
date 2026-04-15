@@ -16,8 +16,11 @@ export async function POST(req: Request) {
            ejecutado_por = $2,
            fecha_completada = $3,
            imagen_antes = $4,
-           imagen_despues = $5
-       WHERE id = $6
+           imagen_despues = $5,
+           tipo_mantenimiento = $6,
+           repuestos_usados = $7,
+           observaciones = $8
+       WHERE id = $9
        RETURNING *`,
       [
         body.workDone,
@@ -25,7 +28,10 @@ export async function POST(req: Request) {
         body.completionDate,
         body.imageBefore,
         body.imageAfter,
-        body.taskId
+        body.tipoMantenimiento ?? null,
+        body.repuestos ?? null,
+        body.observaciones ?? null,
+        body.taskId,
       ]
     )
 

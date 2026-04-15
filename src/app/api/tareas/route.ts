@@ -52,9 +52,8 @@ export async function GET(req: Request) {
       `SELECT * FROM tareas_cronograma
        WHERE frecuencia IS NOT NULL
          AND frecuencia <> 'ninguna'
-         AND proxima_ejecucion IS NOT NULL
-         AND proxima_ejecucion <= $1`,
-      [now.toISOString()],
+         AND proxima_ejecucion IS NOT NULL`,
+      [],
     )
 
     for (const baseTask of recurrentesResult.rows) {
@@ -62,6 +61,16 @@ export async function GET(req: Request) {
         ? new Date(baseTask.proxima_ejecucion)
         : null
       if (!proxima) continue
+
+      const anticipacionDias: number = baseTask.anticipacion_dias ?? 30
+      const diffMs = proxima.getTime() - now.getTime()
+      const diffDias = diffMs / (1000 * 60 * 60 * 24)
+
+      // Solo generar la instancia cuando la próxima ejecución esté dentro
+      // de la ventana de anticipación configurada (o ya vencida)
+      if (diffDias > anticipacionDias) {
+        continue
+      }
 
       // Evitar duplicados: verificar si ya existe una tarea para ese mismo código y fecha
       const existing = await query(
@@ -208,12 +217,14 @@ export async function POST(req: Request) {
         ? null
         : calcularProximaEjecucion(frecuencia, intervalo, fechaProgramada)
 
+    const anticipacionDias = typeof body.anticipacion_dias === 'number' ? body.anticipacion_dias : 30
+
     const { rows } = await query(
       `INSERT INTO tareas_cronograma (
         codigo_equipo, codigo_zona, area, titulo, descripcion, tipo_tarea,
         cronograma, prioridad, estado, fecha_programada, responsable, tiene_alerta,
-        frecuencia, intervalo, ultima_ejecucion, proxima_ejecucion
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        frecuencia, intervalo, ultima_ejecucion, proxima_ejecucion, anticipacion_dias
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       RETURNING *`,
       [
         body.codigo_equipo,
@@ -232,6 +243,7 @@ export async function POST(req: Request) {
         intervalo,
         null,
         proximaEjecucionInicial ? proximaEjecucionInicial.toISOString() : null,
+        anticipacionDias,
       ],
     )
 
@@ -311,6 +323,8 @@ export async function PUT(req: Request) {
       proximaEjecucion = siguiente ? siguiente.toISOString() : null
     }
 
+    const anticipacionDiasUpdate = typeof body.anticipacion_dias === 'number' ? body.anticipacion_dias : 30
+
     const { rows } = await query(
       `UPDATE tareas_cronograma 
        SET codigo_equipo = $1,
@@ -326,8 +340,9 @@ export async function PUT(req: Request) {
            tiene_alerta = $11,
            frecuencia = $12,
            intervalo = $13,
-           proxima_ejecucion = $14
-       WHERE id = $15
+           proxima_ejecucion = $14,
+           anticipacion_dias = $15
+       WHERE id = $16
        RETURNING *`,
       [
         body.codigo_equipo,
@@ -344,6 +359,7 @@ export async function PUT(req: Request) {
         frecuencia,
         intervalo,
         proximaEjecucion,
+        anticipacionDiasUpdate,
         body.id,
       ],
     )

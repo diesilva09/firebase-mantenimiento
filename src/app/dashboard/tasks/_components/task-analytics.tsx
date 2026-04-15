@@ -33,17 +33,52 @@ interface AnalyticsData {
 
 export function ScheduleAnalytics({ schedule, tasks }: { schedule: Schedule; tasks: Task[] }) {
   const [timePeriod, setTimePeriod] = useState<"monthly" | "annual">("monthly")
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear())
+  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth()) // 0-11
+
+  const availableYears = useMemo(() => {
+    const years = new Set<number>()
+    tasks.forEach(task => {
+      const d = new Date(task.nextExecution)
+      if (!isNaN(d.getTime())) {
+        years.add(d.getFullYear())
+      }
+    })
+    if (years.size === 0) {
+      years.add(new Date().getFullYear())
+    }
+    return Array.from(years).sort((a, b) => a - b)
+  }, [tasks])
+
+  const monthNames = [
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre",
+  ]
 
   const data: AnalyticsData = useMemo(() => {
-    const now = new Date()
-    
     const filteredTasks = tasks.filter(task => {
       const taskDate = new Date(task.nextExecution)
+      if (isNaN(taskDate.getTime())) return false
+
       if (timePeriod === "monthly") {
-        return isSameMonth(taskDate, now) && isSameYear(taskDate, now)
+        return (
+          taskDate.getFullYear() === selectedYear &&
+          taskDate.getMonth() === selectedMonth
+        )
       }
+
       // annual
-      return isSameYear(taskDate, now)
+      return taskDate.getFullYear() === selectedYear
     })
 
     const stats: AnalyticsData["stats"] = {
@@ -52,7 +87,7 @@ export function ScheduleAnalytics({ schedule, tasks }: { schedule: Schedule; tas
       Pendiente: 0,
       Futura: 0,
     }
-    
+
     filteredTasks.forEach(task => {
       if (stats[task.status] !== undefined) {
         stats[task.status]++
@@ -65,7 +100,7 @@ export function ScheduleAnalytics({ schedule, tasks }: { schedule: Schedule; tas
     })).filter(item => item.value > 0)
 
     return { stats, chartData }
-  }, [tasks, timePeriod])
+  }, [tasks, timePeriod, selectedYear, selectedMonth])
 
   const kpiCards = [
     { title: "Total Labores", value: data.stats.total, Icon: Wrench, color: "text-gray-500" },
@@ -78,7 +113,7 @@ export function ScheduleAnalytics({ schedule, tasks }: { schedule: Schedule; tas
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <h3 className="text-lg font-semibold text-foreground">{schedule}</h3>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant={timePeriod === "monthly" ? "default" : "outline"}
             size="sm"
@@ -93,6 +128,34 @@ export function ScheduleAnalytics({ schedule, tasks }: { schedule: Schedule; tas
           >
             Anual
           </Button>
+
+          {/* Selector de año */}
+          <select
+            className="border rounded px-2 py-1 text-sm bg-background"
+            value={selectedYear}
+            onChange={(e) => setSelectedYear(Number(e.target.value))}
+          >
+            {availableYears.map((year) => (
+              <option key={year} value={year}>
+                {year}
+              </option>
+            ))}
+          </select>
+
+          {/* Selector de mes solo en vista mensual */}
+          {timePeriod === "monthly" && (
+            <select
+              className="border rounded px-2 py-1 text-sm bg-background"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(Number(e.target.value))}
+            >
+              {monthNames.map((name, index) => (
+                <option key={index} value={index}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 

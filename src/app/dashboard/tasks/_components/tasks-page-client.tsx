@@ -431,17 +431,22 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
     tipoMantenimiento?: string,
     repuestos?: string,
     observaciones?: string,
-  ) => {
+    executionDateIso?: string,
+  ): Promise<boolean> => {
     try {
       const success = await completeTaskInDB(
         taskId,
         workDone,
         executedBy.name,
         imageUrlBefore,
-        imageUrlAfter
+        imageUrlAfter,
+        executionDateIso,
+        tipoMantenimiento,
+        repuestos,
+        observaciones,
       );
       if (success) {
-        const completionIso = new Date().toISOString();
+        const completionIso = executionDateIso || new Date().toISOString();
         setTasks(prev => prev.map(task =>
           task.id === taskId
             ? { ...task, status: 'Completada', workDone, executedBy, completionDate: completionIso, imageUrlBefore, imageUrlAfter, maintenanceType: tipoMantenimiento, sparesUsed: repuestos, observations: observaciones }
@@ -543,47 +548,46 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
             browserNotif.onclick = (event) => {
               event.preventDefault();
               window.focus();
-              if (browserNotif.data?.url) window.location.href = browserNotif.data.url;
+              if (browserNotif.data?.url) {
+                window.location.href = browserNotif.data.url;
+              }
             };
           }
         }
 
+        // Registrar hoja de vida en equipos o zonas
         try {
-          const numericTaskId = parseInt(taskId, 10);
-          const isEquipoSchedule = baseTask && (baseTask.schedule === 'Maquinaria' || baseTask.schedule === 'Equipo de Medición');
+          const numericTaskId = Number(taskId);
           const isZonaSchedule = baseTask && (baseTask.schedule === 'Partes Altas' || baseTask.schedule === 'Mantenimiento Locativo');
 
-          if (baseTask && baseTask.code && !isNaN(numericTaskId)) {
-            if (isEquipoSchedule) {
+          if (!Number.isNaN(numericTaskId) && baseTask?.code) {
+            const payloadBase = {
+              tareaId: numericTaskId,
+              fechaEvento: completionIso,
+              labor: workDone,
+              tipoMantenimiento: tipoMantenimiento,
+              repuestosUsados: repuestos,
+              observaciones: observaciones,
+              ejecutadoPor: executedBy.name,
+              creadoPor: userEmail || null,
+            };
+
+            if (!isZonaSchedule) {
               await fetch('/api/equipos/historial', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   codigoEquipo: baseTask.code,
-                  tareaId: numericTaskId,
-                  fechaEvento: completionIso,
-                  labor: workDone,
-                  tipoMantenimiento: tipoMantenimiento,
-                  repuestosUsados: repuestos,
-                  observaciones: observaciones,
-                  ejecutadoPor: executedBy.name,
-                  creadoPor: userEmail || null,
+                  ...payloadBase,
                 }),
               });
-            } else if (isZonaSchedule) {
+            } else {
               await fetch('/api/zonas/historial', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   codigoZona: baseTask.code,
-                  tareaId: numericTaskId,
-                  fechaEvento: completionIso,
-                  labor: workDone,
-                  tipoMantenimiento: tipoMantenimiento,
-                  repuestosUsados: repuestos,
-                  observaciones: observaciones,
-                  ejecutadoPor: executedBy.name,
-                  creadoPor: userEmail || null,
+                  ...payloadBase,
                 }),
               });
             }
@@ -598,12 +602,14 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         });
         setIsCompleteOpen(false);
         setSelectedTask(null);
+        return true;
       } else {
         throw new Error('Error al guardar en la BD');
       }
     } catch (error) {
       console.error('Error completing task:', error);
       toast({ title: "Error", description: "No se pudo completar la tarea", variant: "destructive" });
+      return false;
     }
   };
 

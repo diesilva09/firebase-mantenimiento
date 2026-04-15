@@ -29,6 +29,7 @@ export type Task = {
   imageUrlAfter?: string;
   frecuencia?: 'ninguna' | 'diaria' | 'semanal' | 'mensual' | 'trimestral' | 'personalizada';
   intervalo?: number | null;
+  anticipacion_dias?: number | null;
 };
 
 export type FormSlug = 'inspeccion-equipos' | 'orden-mantenimiento' | 'paradas-operativas' | 'consumo-diario' | 'mantenimiento-locativo' | 'solicitud-repuestos' | 're-mtt-007' | 're-mtt-006' | 'minuta-mtto';

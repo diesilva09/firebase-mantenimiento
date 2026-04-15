@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Form,
   FormControl,
@@ -25,6 +26,7 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  FormDescription,
 } from "@/components/ui/form"
 import {
   Select,
@@ -55,13 +57,23 @@ const taskSchema = z
     hasAlert: z.boolean().default(false),
     frecuencia: z.enum(['ninguna', 'diaria', 'semanal', 'mensual', 'trimestral', 'personalizada']).default('ninguna'),
     intervalo: z
-      .number()
+      .coerce.number()
       .int()
       .positive("Debe ser un número mayor que cero")
       .optional(),
+    anticipacionDias: z
+      .coerce.number()
+      .int()
+      .min(0, "Debe ser un número mayor o igual a cero")
+      .max(365, "No puede ser mayor a 365 días")
+      .optional(),
   })
   .refine(
-    (data) => (data.assignedTo === 'otro' ? Boolean(data.customAssignedTo?.trim()) : true),
+    (data) => (
+      data.assignedTo === 'otro' || data.assignedTo === 'personal-externo'
+        ? Boolean(data.customAssignedTo?.trim())
+        : true
+    ),
     {
       path: ['customAssignedTo'],
       message: 'Ingresa el nombre del responsable.',
@@ -158,26 +170,31 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
   useEffect(() => {
     if (isOpen && task) {
       // Determinar cómo mapear el responsable al formulario basándonos en ID y NOMBRE.
-      // Objetivo: si es uno de la lista fija, dejarlo seleccionado; solo usar "otro"
-      // cuando realmente es un responsable personalizado.
+      // Objetivo: si es uno de la lista fija, dejarlo seleccionado; usar "Personal Externo"
+      // cuando el nombre venga como "Personal Externo - X"; y solo usar "otro" cuando
+      // realmente es un responsable personalizado genérico.
       const fixedTechnicians: { id: string; name: string }[] = [
-        { id: 'luis-bohorquez', name: 'Luis Bohorquez' },
-        { id: 'duvan-guevara', name: 'Duvan Guevara' },
-        { id: 'juan-david-caro', name: 'Juan David Caro' },
-        { id: 'sergio-rubiano', name: 'Sergio Rubiano' },
-        { id: 'javier-morales', name: 'Javier Morales' },
+        { id: 'luis bohorquez', name: 'Luis Bohorquez' },
+        { id: 'duvan guevara', name: 'Duvan Guevara' },
+        { id: 'juan david caro', name: 'Juan David Caro' },
+        { id: 'sergio rubiano', name: 'Sergio Rubiano' },
+        { id: 'javier morales', name: 'Javier Morales' },
       ]
 
       const currentId = (task.assignedTo.id || '').trim()
       const currentName = (task.assignedTo.name || '').trim()
       const currentNameLower = currentName.toLowerCase()
 
-      // 1) Intentar emparejar por id exacto
+      // Detectar patrón de Personal Externo: "Personal Externo - Nombre"
+      const externoPrefix = 'personal externo - '
+      const isPersonalExterno = currentNameLower.startsWith(externoPrefix)
+
+      // 1) Intentar emparejar por id exacto para técnicos fijos
       let matchFijo = fixedTechnicians.find((t) => t.id === currentId)
 
       // 2) Si no coincide por id, intentar por nombre (por ejemplo cuando
       // en BD quedó guardado el id como texto del nombre o similar).
-      if (!matchFijo) {
+      if (!matchFijo && !isPersonalExterno) {
         matchFijo = fixedTechnicians.find(
           (t) => t.name.trim().toLowerCase() === currentNameLower || t.id === currentNameLower,
         )
@@ -186,7 +203,12 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
       let assignedToValue: string
       let customAssignedToValue: string
 
-      if (matchFijo) {
+      if (isPersonalExterno) {
+        // Responsable externo: dejar seleccionado "Personal Externo" y en el input solo el nombre base
+        assignedToValue = 'personal-externo'
+        const baseName = currentName.slice('Personal Externo - '.length).trim()
+        customAssignedToValue = baseName
+      } else if (matchFijo) {
         // Coincide con uno de los técnicos de la lista: seleccionar ese id
         assignedToValue = matchFijo.id
         customAssignedToValue = ''
@@ -209,6 +231,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
         hasAlert: task.hasAlert || false,
         frecuencia: task.frecuencia ?? 'ninguna',
         intervalo: task.intervalo ?? undefined,
+        anticipacionDias: (task as any).anticipacion_dias ?? 30,
       })
       setCodeQuery(task.code)
       setAreaQuery(task.area)
@@ -271,6 +294,16 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
           }
         }
 
+        const responsableNombre = (() => {
+          if (data.assignedTo === 'personal-externo' && data.customAssignedTo) {
+            return `Personal Externo - ${data.customAssignedTo}`
+          }
+          if (data.assignedTo === 'otro') {
+            return data.customAssignedTo
+          }
+          return data.assignedTo
+        })()
+
         const tareaData = {
           id: task.id,
           codigo_equipo: matchedEquipo ? matchedEquipo.codigo : null,
@@ -282,10 +315,11 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
           cronograma: data.schedule,
           prioridad: data.priority,
           fecha_programada: data.nextExecution.toISOString(),
-          responsable: data.assignedTo === 'otro' ? data.customAssignedTo : data.assignedTo,
+          responsable: responsableNombre,
           tiene_alerta: data.hasAlert,
           frecuencia: data.frecuencia,
           intervalo: data.frecuencia === 'ninguna' ? null : (data.intervalo ?? 1),
+          anticipacion_dias: data.anticipacionDias,
         }
 
         const response = await fetch('/api/tareas', {
@@ -309,6 +343,14 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
             name,
             avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`,
           }
+        } else if (data.assignedTo === 'personal-externo' && data.customAssignedTo) {
+          const baseName = data.customAssignedTo.trim()
+          const name = `Personal Externo - ${baseName}`
+          assignedToUser = {
+            id: 'personal-externo',
+            name,
+            avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`,
+          }
         }
 
         const finalAssignedTo = assignedToUser ?? {
@@ -329,6 +371,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
           hasAlert: data.hasAlert,
           frecuencia: data.frecuencia,
           intervalo: data.frecuencia === 'ninguna' ? null : (data.intervalo ?? 1),
+          anticipacion_dias: data.anticipacionDias,
         }
 
         onEditTask(updatedTask)
@@ -471,12 +514,96 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
                 <FormItem>
                   <FormLabel>Descripción</FormLabel>
                   <FormControl>
-                    <Input placeholder="Mantenimiento preventivo trimestral" {...field} />
+                    <Textarea
+                      placeholder="Mantenimiento preventivo trimestral"
+                      className="min-h-[60px] resize-y"
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="frecuencia"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Frecuencia</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Sin repetición" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="ninguna">Sin repetición</SelectItem>
+                        <SelectItem value="diaria">Diaria</SelectItem>
+                        <SelectItem value="semanal">Semanal</SelectItem>
+                        <SelectItem value="mensual">Mensual</SelectItem>
+                        <SelectItem value="trimestral">Trimestral</SelectItem>
+                        <SelectItem value="personalizada">Personalizada (cada X días)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              {form.watch('frecuencia') !== 'ninguna' && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="intervalo"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Intervalo</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            min={1}
+                            placeholder="1"
+                            value={field.value ?? ''}
+                            onChange={(e) => {
+                              // Guardar el valor tal cual (incluyendo cadena vacía) para permitir borrar todos los dígitos
+                              field.onChange(e.target.value)
+                            }}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="anticipacionDias"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Generar tarea días antes</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={365}
+                            placeholder="30"
+                            value={field.value ?? ''}
+                            onChange={(e) => {
+                              const value = e.target.value
+                              field.onChange(value ? Number(value) : undefined)
+                            }}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          Cuántos días antes de la fecha de ejecución quieres que la tarea aparezca en el cronograma.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -528,60 +655,6 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
                   </FormItem>
                 )}
               />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="frecuencia"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Frecuencia</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Sin repetición" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="ninguna">Sin repetición</SelectItem>
-                        <SelectItem value="diaria">Diaria</SelectItem>
-                        <SelectItem value="semanal">Semanal</SelectItem>
-                        <SelectItem value="mensual">Mensual</SelectItem>
-                        <SelectItem value="trimestral">Trimestral</SelectItem>
-                        <SelectItem value="personalizada">Personalizada (cada X días)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              {form.watch('frecuencia') !== 'ninguna' && (
-                <FormField
-                  control={form.control}
-                  name="intervalo"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Intervalo</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min={1}
-                          placeholder="1"
-                          value={field.value ?? ''}
-                          onChange={(e) => {
-                            const value = e.target.value
-                            field.onChange(value ? Number(value) : undefined)
-                          }}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField
                 control={form.control}
                 name="assignedTo"
@@ -600,6 +673,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
                         <SelectItem value="juan-david-caro">Juan David Caro</SelectItem>
                         <SelectItem value="sergio-rubiano">Sergio Rubiano</SelectItem>
                         <SelectItem value="javier-morales">Javier Morales</SelectItem>
+                        <SelectItem value="personal-externo">Personal Externo</SelectItem>
                         <SelectItem value="otro">Otro técnico</SelectItem>
                       </SelectContent>
                     </Select>
@@ -607,7 +681,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
                   </FormItem>
                 )}
               />
-              {form.watch("assignedTo") === 'otro' && (
+              {(form.watch("assignedTo") === 'otro' || form.watch("assignedTo") === 'personal-externo') && (
                 <FormField
                   control={form.control}
                   name="customAssignedTo"

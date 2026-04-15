@@ -28,6 +28,7 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  FormDescription,
 } from "@/components/ui/form"
 import {
   Select,
@@ -63,13 +64,23 @@ const taskSchema = z
     customReminderDate: z.date().optional(),
     frecuencia: z.enum(['ninguna', 'diaria', 'semanal', 'mensual', 'trimestral', 'personalizada']).default('ninguna'),
     intervalo: z
-      .number()
+      .coerce.number()
       .int()
       .positive("Debe ser un número mayor que cero")
       .optional(),
+    anticipacionDias: z
+      .coerce.number()
+      .int()
+      .min(0, "Debe ser un número mayor o igual a cero")
+      .max(365, "No puede ser mayor a 365 días")
+      .optional(),
   })
   .refine(
-    (data) => (data.assignedTo === 'otro' ? Boolean(data.customAssignedTo?.trim()) : true),
+    (data) => (
+      data.assignedTo === 'otro' || data.assignedTo === 'personal-externo'
+        ? Boolean(data.customAssignedTo?.trim())
+        : true
+    ),
     {
       path: ['customAssignedTo'],
       message: 'Ingresa el nombre del responsable.',
@@ -98,6 +109,9 @@ interface AddTaskDialogProps {
   users: User[]
 }
 
+type EquipmentLookup = { codigo: string; nombre: string; area?: string | null; linea?: string | null }
+type ZonaLookup = { id: string; codigo: string | null; nombre: string; area: string | null; tipo: string }
+
 export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDialogProps) {
   const { addNotification, permission } = useNotifications()
   const { toast } = useToast()
@@ -117,11 +131,9 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
       customReminderDate: undefined,
       frecuencia: 'ninguna',
       intervalo: undefined,
+      anticipacionDias: 30,
     },
   })
-
-  type EquipmentLookup = { codigo: string; nombre: string; area?: string | null; linea?: string | null }
-  type ZonaLookup = { id: string; codigo: string | null; nombre: string; area: string | null; tipo: string }
 
   const [equipos, setEquipos] = useState<EquipmentLookup[]>([])
   const [zonas, setZonas] = useState<ZonaLookup[]>([])
@@ -129,6 +141,8 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
   const [areaQuery, setAreaQuery] = useState("")
   const [showCodeSuggestions, setShowCodeSuggestions] = useState(false)
   const [showAreaSuggestions, setShowAreaSuggestions] = useState(false)
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number>(-1)
+  const suggestionsContainerRef = useRef<HTMLDivElement | null>(null)
 
   // Estado para autosugerencias de descripción
   const [descriptionSuggestion, setDescriptionSuggestion] = useState("")
@@ -218,47 +232,47 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
   }, [descriptionSuggestion, form])
 
   useEffect(() => {
-  const fetchEquipos = async () => {
-    try {
-      const response = await fetch('/api/equipos');
-      const data = await response.json();
-      const equiposData = data.data || [];
-      
-      const mapped: EquipmentLookup[] = equiposData
-        .filter((e: any) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
-        .map((e: any) => ({ 
-          codigo: e.codigo, 
-          nombre: e.nombre, 
-          area: e.area ?? null,
-          linea: e.linea ?? null,
-        }));
-      
-      setEquipos(mapped);
-    } catch (e) {
-      console.warn("No se pudo cargar la lista de equipos desde la API", e);
-      
-      // Fallback a localStorage
+    const fetchEquipos = async () => {
       try {
-        const raw = typeof window !== "undefined" ? localStorage.getItem("equipos") : null;
-        if (!raw) return;
-        const parsed = JSON.parse(raw) as any[];
-        const mapped: EquipmentLookup[] = parsed
-          .filter((e) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
-          .map((e) => ({ 
+        const response = await fetch('/api/equipos');
+        const data = await response.json();
+        const equiposData = data.data || [];
+        
+        const mapped: EquipmentLookup[] = equiposData
+          .filter((e: any) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
+          .map((e: any) => ({ 
             codigo: e.codigo, 
             nombre: e.nombre, 
             area: e.area ?? null,
             linea: e.linea ?? null,
           }));
+        
         setEquipos(mapped);
-      } catch (localError) {
-        console.warn("Fallback a localStorage también falló", localError);
+      } catch (e) {
+        console.warn("No se pudo cargar la lista de equipos desde la API", e);
+        
+        // Fallback a localStorage
+        try {
+          const raw = typeof window !== "undefined" ? localStorage.getItem("equipos") : null;
+          if (!raw) return;
+          const parsed = JSON.parse(raw) as any[];
+          const mapped: EquipmentLookup[] = parsed
+            .filter((e) => e && typeof e.codigo === "string" && typeof e.nombre === "string")
+            .map((e) => ({ 
+              codigo: e.codigo, 
+              nombre: e.nombre, 
+              area: e.area ?? null,
+              linea: e.linea ?? null,
+            }));
+          setEquipos(mapped);
+        } catch (localError) {
+          console.warn("Fallback a localStorage también falló", localError);
+        }
       }
-    }
-  };
+    };
 
-  fetchEquipos();
-}, []);
+    fetchEquipos();
+  }, []);
 
   // Cargar zonas para sugerencias de área/zona
   useEffect(() => {
@@ -327,91 +341,95 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
       .slice(0, 10);
   }, [codeQuery, zonas]);
 
- async function onSubmit(data: TaskFormValues) {
-  try {
-    const rawCode = data.code?.trim() || "";
-    const area = data.area;
+  async function onSubmit(data: TaskFormValues) {
+    try {
+      const rawCode = data.code?.trim() || "";
+      const area = data.area;
 
-    const matchedEquipo = equipos.find((e) => e.codigo === rawCode);
-    const matchedZona = zonas.find((z) => (z.codigo || z.nombre) === rawCode);
+      const matchedEquipo = equipos.find((e) => e.codigo === rawCode);
+      const matchedZona = zonas.find((z) => (z.codigo || z.nombre) === rawCode);
 
-    if (matchedZona) {
-      if (matchedZona.tipo === "PARTES_ALTAS" && data.schedule !== "Partes Altas") {
-        toast({
-          title: "Cronograma incorrecto",
-          description: "Esta zona pertenece a Partes Altas. Debe seleccionar el cronograma 'Partes Altas'.",
-          variant: "destructive",
-        })
-        return
+      if (matchedZona) {
+        if (matchedZona.tipo === "PARTES_ALTAS" && data.schedule !== "Partes Altas") {
+          toast({
+            title: "Cronograma incorrecto",
+            description: "Esta zona pertenece a Partes Altas. Debe seleccionar el cronograma 'Partes Altas'.",
+            variant: "destructive",
+          })
+          return
+        }
+        if (matchedZona.tipo === "LOCATIVO" && data.schedule !== "Mantenimiento Locativo") {
+          toast({
+            title: "Cronograma incorrecto",
+            description: "Esta zona pertenece a Mantenimiento Locativo. Debe seleccionar el cronograma 'Mantenimiento Locativo'.",
+            variant: "destructive",
+          })
+          return
+        }
       }
-      if (matchedZona.tipo === "LOCATIVO" && data.schedule !== "Mantenimiento Locativo") {
-        toast({
-          title: "Cronograma incorrecto",
-          description: "Esta zona pertenece a Mantenimiento Locativo. Debe seleccionar el cronograma 'Mantenimiento Locativo'.",
-          variant: "destructive",
-        })
-        return
-      }
-    }
 
-    const codigoEquipoForDB = matchedEquipo ? matchedEquipo.codigo : null;
-    const codigoZonaForDB = !matchedEquipo && matchedZona ? (matchedZona.codigo || matchedZona.nombre) : null;
+      const codigoEquipoForDB = matchedEquipo ? matchedEquipo.codigo : null;
+      const codigoZonaForDB = !matchedEquipo && matchedZona ? (matchedZona.codigo || matchedZona.nombre) : null;
 
-    // Obtener el nombre completo del responsable para la notificación
-    const responsableId = data.assignedTo;
-    let responsableName = '';
-    if (responsableId === 'otro') {
+      // Obtener el nombre completo del responsable para la BD / notificación
+      const responsableId = data.assignedTo;
+      let responsableName = '';
+      if (responsableId === 'personal-externo') {
+        const baseName = data.customAssignedTo?.trim() || '';
+        responsableName = baseName ? `Personal Externo - ${baseName}` : 'Personal Externo';
+      } else if (responsableId === 'otro') {
         responsableName = data.customAssignedTo?.trim() || '';
-    } else {
+      } else {
         const user = users.find(u => u.id === responsableId);
         responsableName = user ? user.name : responsableId;
-    }
+      }
 
-    const tareaData = {
-      codigo_equipo: codigoEquipoForDB,
-      codigo_zona: codigoZonaForDB,
-      area: area,
-      titulo: data.description,
-      descripcion: data.description,
-      tipo_tarea: 'mantenimiento',
-      cronograma: data.schedule,
-      prioridad: data.priority,
-      fecha_programada: data.nextExecution.toISOString(),
-      responsable: responsableName,
-      tiene_alerta: data.hasAlert,
-      frecuencia: data.frecuencia,
-      intervalo: data.frecuencia === 'ninguna' ? null : (data.intervalo ?? 1),
-    };
+      const tareaData = {
+        codigo_equipo: codigoEquipoForDB,
+        codigo_zona: codigoZonaForDB,
+        area: area,
+        titulo: data.description,
+        descripcion: data.description,
+        tipo_tarea: 'mantenimiento',
+        cronograma: data.schedule,
+        prioridad: data.priority,
+        fecha_programada: data.nextExecution.toISOString(),
+        responsable: responsableName,
+        tiene_alerta: data.hasAlert,
+        frecuencia: data.frecuencia,
+        intervalo: data.frecuencia === 'ninguna' ? null : (data.intervalo ?? 1),
+        anticipacion_dias: data.frecuencia === 'ninguna' ? null : (data.anticipacionDias ?? 30),
+      };
 
-    console.log('Enviando tarea a la BD:', tareaData);
+      console.log('Enviando tarea a la BD:', tareaData);
 
-    const response = await fetch('/api/tareas', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(tareaData),
-    });
+      const response = await fetch('/api/tareas', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(tareaData),
+      });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Error al guardar en la BD');
-    }
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Error al guardar en la BD');
+      }
 
-    const dbTask = await response.json();
+      const dbTask = await response.json();
 
-    if (data.hasAlert) {
+      if (data.hasAlert) {
         const taskForReminder: Task = {
-            id: String(dbTask.id),
-            description: data.description,
-            area: data.area,
-            code: data.code,
-            schedule: data.schedule,
-            priority: data.priority,
-            assignedTo: users.find(u => u.id === data.assignedTo) || { id: 'unknown', name: 'Unknown', avatarUrl: '' },
-            nextExecution: data.nextExecution.toISOString(),
-            hasAlert: data.hasAlert,
-            status: 'Pendiente'
+          id: String(dbTask.id),
+          description: data.description,
+          area: data.area,
+          code: data.code,
+          schedule: data.schedule,
+          priority: data.priority,
+          assignedTo: users.find(u => u.id === data.assignedTo) || { id: 'unknown', name: 'Unknown', avatarUrl: '' },
+          nextExecution: data.nextExecution.toISOString(),
+          hasAlert: data.hasAlert,
+          status: 'Pendiente'
         };
         await scheduleTaskReminders(
           taskForReminder,
@@ -424,56 +442,62 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
         );
       }
 
-    let assignedToUser = users.find(u => u.id === data.assignedTo)
-    if (data.assignedTo === 'otro' && data.customAssignedTo) {
-      const name = data.customAssignedTo.trim()
-      assignedToUser = {
-        id: `custom-${Date.now()}`,
-        name,
-        avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`,
+      let assignedToUser = users.find(u => u.id === data.assignedTo)
+      if (data.assignedTo === 'otro' && data.customAssignedTo) {
+        const name = data.customAssignedTo.trim()
+        assignedToUser = {
+          id: `custom-${Date.now()}`,
+          name,
+          avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`,
+        }
+      } else if (data.assignedTo === 'personal-externo' && data.customAssignedTo) {
+        const baseName = data.customAssignedTo.trim()
+        const name = `Personal Externo - ${baseName}`
+        assignedToUser = {
+          id: 'personal-externo',
+          name,
+          avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`,
+        }
       }
+
+      const finalAssignedTo = assignedToUser ?? {
+        id: data.assignedTo,
+        name: data.customAssignedTo || data.assignedTo,
+        avatarUrl: '',
+      }
+
+      const newTaskForParent: Task = {
+        id: String(dbTask.id),
+        code: data.code ?? '',
+        area: data.area ?? '',
+        description: data.description ?? '',
+        schedule: data.schedule,
+        priority: data.priority,
+        assignedTo: finalAssignedTo,
+        nextExecution: data.nextExecution.toISOString(),
+        hasAlert: data.hasAlert,
+        status: 'Pendiente',
+        anticipacion_dias: data.frecuencia === 'ninguna' ? null : (data.anticipacionDias ?? 30),
+      }
+
+      onAddTask(newTaskForParent)
+
+      setIsOpen(false)
+      form.reset()
+      setCodeQuery("")
+      setAreaQuery("")
+    } catch (error) {
+      console.error('Error guardando tarea:', error);
+      toast({
+        title: "Error al crear la tarea",
+        description: error instanceof Error ? error.message : "Ocurrió un error al crear la tarea",
+        variant: "destructive",
+      });
     }
-
-    const finalAssignedTo = assignedToUser ?? {
-      id: data.assignedTo,
-      name: data.customAssignedTo || data.assignedTo,
-      avatarUrl: '',
-    }
-
-    const newTaskForParent: Task = {
-      id: String(dbTask.id),
-      code: data.code ?? '',
-      area: data.area ?? '',
-      description: data.description ?? '',
-      schedule: data.schedule,
-      priority: data.priority,
-      assignedTo: finalAssignedTo,
-      nextExecution: data.nextExecution.toISOString(),
-      hasAlert: data.hasAlert,
-      status: 'Pendiente',
-    }
-
-    onAddTask(newTaskForParent)
-
-    setIsOpen(false)
-    form.reset()
-    setCodeQuery("")
-    setAreaQuery("")
-
-  } catch (error) {
-    console.error('Error guardando tarea:', error);
-    toast({
-      title: "Error al crear la tarea",
-      description: error instanceof Error ? error.message : "Ocurrió un error al crear la tarea",
-      variant: "destructive",
-    });
   }
-}
-
-
 
   return (
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogContent className="w-[95vw] max-w-lg sm:max-w-xl md:max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>Agregar Nueva Labor</DialogTitle>
@@ -499,78 +523,155 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                           setCodeQuery(v)
                           field.onChange(v)
                           setShowCodeSuggestions(true)
+                          setActiveSuggestionIndex(-1)
                         }}
                         onFocus={() => {
                           if (codeQuery) setShowCodeSuggestions(true)
                         }}
                         onBlur={() => {
-                          setTimeout(() => setShowCodeSuggestions(false), 150)
+                          setTimeout(() => {
+                            setShowCodeSuggestions(false)
+                            setActiveSuggestionIndex(-1)
+                          }, 150)
+                        }}
+                        onKeyDown={(e) => {
+                          const totalSuggestions = filteredByCode.length + filteredZonasByCode.length
+                          if (!showCodeSuggestions || totalSuggestions === 0) return
+
+                          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                            e.preventDefault()
+                            const delta = e.key === 'ArrowDown' ? 1 : -1
+                            const newIndex = ((activeSuggestionIndex + delta) % totalSuggestions + totalSuggestions) % totalSuggestions
+                            setActiveSuggestionIndex(newIndex)
+
+                            const container = suggestionsContainerRef.current
+                            if (container) {
+                              const el = container.querySelector<HTMLButtonElement>(`button[data-suggestion-index="${newIndex}"]`)
+                              el?.scrollIntoView({ block: 'nearest' })
+                            }
+                          }
+
+                          if (e.key === 'Enter' && activeSuggestionIndex >= 0) {
+                            e.preventDefault()
+                            const idx = activeSuggestionIndex
+                            if (idx < filteredByCode.length) {
+                              const eItem = filteredByCode[idx]
+                              const codeLabel = eItem.codigo
+                              const areaText = eItem.area ?? "Sin área"
+                              const lineaText = eItem.linea ?? "Sin línea"
+                              const areaLabel = `${areaText} - ${lineaText} - ${eItem.nombre}`
+                              setCodeQuery(codeLabel)
+                              field.onChange(codeLabel)
+                              form.setValue("area", areaLabel)
+                              setAreaQuery(areaLabel)
+                            } else {
+                              const zIndex = idx - filteredByCode.length
+                              const zItem = filteredZonasByCode[zIndex]
+                              if (zItem) {
+                                const codeLabel = zItem.codigo || zItem.nombre
+                                const areaLabel = zItem.area ? `${zItem.area} - ${zItem.nombre}` : zItem.nombre
+                                setCodeQuery(codeLabel)
+                                field.onChange(codeLabel)
+                                form.setValue("area", areaLabel)
+                                setAreaQuery(areaLabel)
+
+                                if (zItem.tipo === "PARTES_ALTAS") {
+                                  form.setValue("schedule", "Partes Altas")
+                                } else if (zItem.tipo === "LOCATIVO") {
+                                  form.setValue("schedule", "Mantenimiento Locativo")
+                                }
+                              }
+                            }
+
+                            setShowCodeSuggestions(false)
+                            setActiveSuggestionIndex(-1)
+                          }
                         }}
                       />
                     </FormControl>
                     {showCodeSuggestions && (filteredByCode.length > 0 || filteredZonasByCode.length > 0) && (
-                      <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border bg-popover text-xs shadow-md">
+                      <div
+                        ref={suggestionsContainerRef}
+                        className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border bg-popover text-xs shadow-md"
+                      >
                         {filteredByCode.length > 0 && (
                           <>
                             <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase">Equipos</div>
-                            {filteredByCode.map((e) => (
-                              <button
-                                type="button"
-                                key={e.codigo}
-                                className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
-                                onMouseDown={(ev) => {
-                                  ev.preventDefault()
-                                  const codeLabel = e.codigo
-                                  const areaText = e.area ?? "Sin área"
-                                  const lineaText = e.linea ?? "Sin línea"
-                                  const areaLabel = `${areaText} - ${lineaText} - ${e.nombre}`
-                                  setCodeQuery(codeLabel)
-                                  field.onChange(codeLabel)
-                                  form.setValue("area", areaLabel)
-                                  setAreaQuery(areaLabel)
-                                  setShowCodeSuggestions(false)
-                                }}
-                              >
-                                <span className="font-medium">{e.codigo}</span>
-                                <span className="text-[11px] text-muted-foreground">
-                                  {e.area ?? "Sin área"}
-                                  {e.linea ? ` • ${e.linea}` : ""}
-                                  {` • ${e.nombre}`}
-                                </span>
-                              </button>
-                            ))}
+                            {filteredByCode.map((e, idx) => {
+                              const globalIndex = idx
+                              const isActive = globalIndex === activeSuggestionIndex
+                              return (
+                                <button
+                                  type="button"
+                                  key={e.codigo}
+                                  data-suggestion-index={globalIndex}
+                                  className={cn(
+                                    "flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent",
+                                    isActive && "bg-accent"
+                                  )}
+                                  onMouseDown={(ev) => {
+                                    ev.preventDefault()
+                                    const codeLabel = e.codigo
+                                    const areaText = e.area ?? "Sin área"
+                                    const lineaText = e.linea ?? "Sin línea"
+                                    const areaLabel = `${areaText} - ${lineaText} - ${e.nombre}`
+                                    setCodeQuery(codeLabel)
+                                    field.onChange(codeLabel)
+                                    form.setValue("area", areaLabel)
+                                    setAreaQuery(areaLabel)
+                                    setShowCodeSuggestions(false)
+                                    setActiveSuggestionIndex(-1)
+                                  }}
+                                >
+                                  <span className="font-medium">{e.codigo}</span>
+                                  <span className="text-[11px] text-muted-foreground">
+                                    {e.area ?? "Sin área"}
+                                    {e.linea ? ` • ${e.linea}` : ""}
+                                    {` • ${e.nombre}`}
+                                  </span>
+                                </button>
+                              )
+                            })}
                           </>
                         )}
 
                         {filteredZonasByCode.length > 0 && (
                           <>
                             <div className="mt-1 px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase border-t bg-background">Zonas</div>
-                            {filteredZonasByCode.map((z) => (
-                              <button
-                                type="button"
-                                key={z.id}
-                                className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
-                                onMouseDown={(ev) => {
-                                  ev.preventDefault();
-                                  const codeLabel = z.codigo || z.nombre; // usar código real de la zona si existe
-                                  const areaLabel = z.area ? `${z.area} - ${z.nombre}` : z.nombre;
-                                  setCodeQuery(codeLabel);
-                                  field.onChange(codeLabel);
-                                  form.setValue("area", areaLabel);
-                                  setAreaQuery(areaLabel);
-                                  setShowCodeSuggestions(false);
+                            {filteredZonasByCode.map((z, idx) => {
+                              const globalIndex = filteredByCode.length + idx
+                              const isActive = globalIndex === activeSuggestionIndex
+                              return (
+                                <button
+                                  type="button"
+                                  key={z.id}
+                                  data-suggestion-index={globalIndex}
+                                  className={cn(
+                                    "flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent",
+                                    isActive && "bg-accent"
+                                  )}
+                                  onMouseDown={(ev) => {
+                                    ev.preventDefault();
+                                    const codeLabel = z.codigo || z.nombre; // usar código real de la zona si existe
+                                    const areaLabel = z.area ? `${z.area} - ${z.nombre}` : z.nombre;
+                                    setCodeQuery(codeLabel);
+                                    field.onChange(codeLabel);
+                                    form.setValue("area", areaLabel);
+                                    setAreaQuery(areaLabel);
+                                    setShowCodeSuggestions(false);
 
-                                  if (z.tipo === "PARTES_ALTAS") {
-                                    form.setValue("schedule", "Partes Altas")
-                                  } else if (z.tipo === "LOCATIVO") {
-                                    form.setValue("schedule", "Mantenimiento Locativo")
-                                  }
-                                }}
-                              >
-                                <span className="font-medium">{z.area ?? "Sin área"}</span>
-                                <span className="text-[11px] text-muted-foreground">Zona • {z.nombre}</span>
-                              </button>
-                            ))}
+                                    if (z.tipo === "PARTES_ALTAS") {
+                                      form.setValue("schedule", "Partes Altas")
+                                    } else if (z.tipo === "LOCATIVO") {
+                                      form.setValue("schedule", "Mantenimiento Locativo")
+                                    }
+                                  }}
+                                >
+                                  <span className="font-medium">{z.area ?? "Sin área"}</span>
+                                  <span className="text-[11px] text-muted-foreground">Zona • {z.nombre}</span>
+                                </button>
+                              )
+                            })}
                           </>
                         )}
                       </div>
@@ -701,28 +802,65 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                 )}
               />
               {form.watch('frecuencia') !== 'ninguna' && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="intervalo"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Intervalo</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            min={1}
+                            placeholder=""
+                            value={field.value ?? ''}
+                            onChange={(e) => {
+                              // Guardar el valor tal cual (incluyendo cadena vacía) para permitir borrar todos los dígitos
+                              field.onChange(e.target.value)
+                            }}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
                 <FormField
-                  control={form.control}
-                  name="intervalo"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Intervalo</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min={1}
-                          placeholder="1"
-                          value={field.value ?? ''}
-                          onChange={(e) => {
-                            const value = e.target.value
-                            field.onChange(value ? Number(value) : undefined)
-                          }}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+  control={form.control}
+  name="anticipacionDias"
+  render={({ field }) => (
+    <FormItem>
+      <FormLabel>Generar tarea días antes</FormLabel>
+      <FormControl>
+        <Input
+          type="number"
+          min={0}
+          max={365}
+          placeholder="30"
+          value={field.value ?? ''}
+          onChange={(e) => {
+            const value = e.target.value
+            // Permitir cadena vacía para borrar todo
+            if (value === '') {
+              field.onChange(undefined)
+            } else {
+              const numValue = Number(value)
+              if (!isNaN(numValue)) {
+                field.onChange(numValue)
+              }
+            }
+          }}
+        />
+      </FormControl>
+      <FormDescription>
+        Cuántos días antes de la fecha de ejecución quieres que la tarea aparezca en el cronograma.
+      </FormDescription>
+      <FormMessage />
+    </FormItem>
+  )}
+/>
+                </>
               )}
             </div>
             <FormField
@@ -769,7 +907,7 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                             <Button
                               type="button"
                               variant="outline"
-                              size="xs"
+                              size="sm"
                               className="text-xs"
                               onClick={applyDescriptionSuggestion}
                             >
@@ -844,19 +982,22 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="luis-bohorquez">Luis Bohorquez</SelectItem>
-                        <SelectItem value="duvan-guevara">Duvan Guevara</SelectItem>
-                        <SelectItem value="juan-david-caro">Juan David Caro</SelectItem>
-                        <SelectItem value="sergio-rubiano">Sergio Rubiano</SelectItem>
-                        <SelectItem value="javier-morales">Javier Morales</SelectItem>
+                        <SelectItem value="luis bohorquez">Luis Bohorquez</SelectItem>
+                        <SelectItem value="duvan guevara">Duvan Guevara</SelectItem>
+                        <SelectItem value="juan david caro">Juan David Caro</SelectItem>
+                        <SelectItem value="sergio rubiano">Sergio Rubiano</SelectItem>
+                        <SelectItem value="javier morales">Javier Morales</SelectItem>
+                        <SelectItem value="Andres">Andres </SelectItem>
+                        <SelectItem value="Robayo">Robayo</SelectItem>
+                        <SelectItem value="personal-externo">Personal Externo</SelectItem>
                         <SelectItem value="otro">Otro técnico</SelectItem>
                       </SelectContent>
                     </Select>
-                    <FormMessage />
+                    <FormMessage/>
                   </FormItem>
                 )}
               />
-              {form.watch("assignedTo") === 'otro' && (
+              {(form.watch("assignedTo") === 'otro' || form.watch("assignedTo") === 'personal-externo') && (
                 <FormField
                   control={form.control}
                   name="customAssignedTo"

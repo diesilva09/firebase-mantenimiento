@@ -41,7 +41,7 @@ export function mapDatabaseTaskToFrontend(dbTask: any, users: User[]): Task {
     id: dbTask.id.toString(),
     code: dbTask.codigo_equipo || dbTask.codigo_zona || 'N/A',
     area: dbTask.area || 'Sin área',
-    description: dbTask.titulo || dbTask.descripcion,
+    description: dbTask.descripcion || dbTask.titulo,
     schedule: dbTask.cronograma,
     priority: dbTask.prioridad,
     status,
@@ -55,7 +55,14 @@ export function mapDatabaseTaskToFrontend(dbTask: any, users: User[]): Task {
     imageUrlAfter: dbTask.imagen_despues,
     frecuencia: dbTask.frecuencia || 'ninguna',
     intervalo: dbTask.intervalo ?? null,
-  }
+    anticipacion_dias: dbTask.anticipacion_dias ?? null,
+    // Campos adicionales usados en TaskDetailsDialog (se acceden como any)
+    // Estos campos pueden estar presentes en la tabla tareas_cronograma
+    // y permiten mostrar Tipo Mantenimiento, Repuestos y Observaciones
+    ...(dbTask.tipo_mantenimiento && { maintenanceType: dbTask.tipo_mantenimiento }),
+    ...(dbTask.repuestos_usados && { sparesUsed: dbTask.repuestos_usados }),
+    ...(dbTask.observaciones && { observations: dbTask.observaciones }),
+  } as any
 }
 
 // Función para obtener tareas desde la API
@@ -94,11 +101,15 @@ export async function fetchTasksFromDB(schedule?: string, userEmail?: string | n
 
 // Función para completar una tarea
 export async function completeTaskInDB(
-  taskId: string, 
-  workDone: string, 
+  taskId: string,
+  workDone: string,
   executedBy: string,
   imageBefore?: string,
-  imageAfter?: string
+  imageAfter?: string,
+  completionDate?: string,
+  tipoMantenimiento?: string,
+  repuestos?: string,
+  observaciones?: string,
 ): Promise<boolean> {
   try {
     const response = await fetch('/api/tareas/completar', {
@@ -112,7 +123,10 @@ export async function completeTaskInDB(
         executedBy,
         imageBefore,
         imageAfter,
-        completionDate: new Date().toISOString()
+        completionDate: completionDate || new Date().toISOString(),
+        tipoMantenimiento,
+        repuestos,
+        observaciones,
       })
     })
 

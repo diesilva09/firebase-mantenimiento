@@ -39,15 +39,15 @@ const AREAS_PARTES_ALTAS = [
 ] as const;
 
 const AREAS_LOCATIVO = [
-  "Cuarto de máquinas",
-  "Preparación",
-  "Envasado",
-  "Etiquetado",
-  "Materia prima",
-  "Producto terminado",
+  "Envasado Frutos",
+  "Encajado",
+  "Envasado Salsas",
+  "Preparacion",
+  "Areas Comunes",
+  "Materia Prima",
+  "Producto Terminado",
   "PTAR",
-  "Administración",
-  "Áreas comunes",
+  "Administracion",
   "General / Sin área específica"
 ] as const;
 
@@ -277,11 +277,31 @@ export function ZonasPageClient() {
   const areasForTipo =
     tipo === "PARTES_ALTAS" ? AREAS_PARTES_ALTAS : AREAS_LOCATIVO;
 
+  // Normaliza texto para comparación de áreas: minúsculas, sin espacios sobrantes ni tildes
+  const normalizeArea = (text: string | null | undefined) => {
+    if (!text) return "";
+    return text
+      .toLowerCase()
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  };
+
   // Filtramos las zonas en el cliente para la visualización, pero mantenemos 'zonas' con todo para validación
   const filteredZonas = zonas.filter((z) => {
     if (z.tipo !== tipo) return false;
-    if (area && z.area !== area) return false;
-    return true;
+
+    // Si no hay filtro de área seleccionado, mostramos todas las áreas de ese tipo
+    if (!area) return true;
+
+    // Normalizamos para evitar problemas por mayúsculas, espacios y tildes
+    const selectedArea = normalizeArea(area);
+    const zonaArea = normalizeArea(z.area);
+
+    if (!zonaArea) return false;
+
+    // Coincidencia exacta o parcial (para casos como "cuarto de maquinas xxx")
+    return zonaArea === selectedArea || zonaArea.includes(selectedArea);
   });
 
   const handleOpenDialog = () => {
