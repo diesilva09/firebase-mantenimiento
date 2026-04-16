@@ -27,6 +27,7 @@ export type Task = {
   equipmentSpecs?: Record<string, string>;
   imageUrlBefore?: string;
   imageUrlAfter?: string;
+  anexoUrl?: string;
   frecuencia?: 'ninguna' | 'diaria' | 'semanal' | 'mensual' | 'trimestral' | 'personalizada';
   intervalo?: number | null;
   anticipacion_dias?: number | null;

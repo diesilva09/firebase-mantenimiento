@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { ClipboardList, LayoutGrid, Wrench, MapPin } from "lucide-react"
 import { DashboardSearchProvider } from "@/context/dashboard-search-context";
 import { GlobalSearchSuggestions } from "@/components/global-search-suggestions"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 
 import { cn } from "@/lib/utils"
@@ -31,12 +32,23 @@ export default function DashboardLayout({
   const pathname = usePathname()
   const router = useRouter()
   const { user, loading } = useUser()
+  const isMobile = useIsMobile()
+  const [sidebarOpen, setSidebarOpen] = React.useState(true)
 
   React.useEffect(() => {
     if (!loading && !user) {
       router.replace("/login")
     }
   }, [loading, user, router])
+
+  // Auto-collapse sidebar on mobile
+  React.useEffect(() => {
+    if (isMobile) {
+      setSidebarOpen(false)
+    } else {
+      setSidebarOpen(true)
+    }
+  }, [isMobile])
 
   // Mientras carga el usuario o aún no tenemos sesión, mostrar pantalla de espera
   if (loading || (!user && typeof window !== "undefined")) {
@@ -76,12 +88,12 @@ export default function DashboardLayout({
   ]
 
   return (
-    <SidebarProvider>
+    <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
       <Sidebar>
-        <SidebarHeader>
-          <div className="flex items-center gap-2">
-            <Logo width={36} height={36} />
-            <span className="text-lg font-semibold text-foreground">
+        <SidebarHeader className="overflow-hidden">
+          <div className="flex items-center gap-2 min-w-0">
+            <Logo width={36} height={36} className="shrink-0" />
+            <span className="text-lg font-semibold text-foreground truncate">
               Area de Mantenimiento
             </span>
           </div>

@@ -174,11 +174,11 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
       // cuando el nombre venga como "Personal Externo - X"; y solo usar "otro" cuando
       // realmente es un responsable personalizado genérico.
       const fixedTechnicians: { id: string; name: string }[] = [
-        { id: 'luis bohorquez', name: 'Luis Bohorquez' },
-        { id: 'duvan guevara', name: 'Duvan Guevara' },
-        { id: 'juan david caro', name: 'Juan David Caro' },
-        { id: 'sergio rubiano', name: 'Sergio Rubiano' },
-        { id: 'javier morales', name: 'Javier Morales' },
+        { id: 'luis-bohorquez', name: 'Luis Bohorquez' },
+        { id: 'duvan-guevara', name: 'Duvan Guevara' },
+        { id: 'juan-david-caro', name: 'Juan David Caro' },
+        { id: 'sergio-rubiano', name: 'Sergio Rubiano' },
+        { id: 'javier-morales', name: 'Javier Morales' },
       ]
 
       const currentId = (task.assignedTo.id || '').trim()
@@ -189,14 +189,21 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
       const externoPrefix = 'personal externo - '
       const isPersonalExterno = currentNameLower.startsWith(externoPrefix)
 
-      // 1) Intentar emparejar por id exacto para técnicos fijos
-      let matchFijo = fixedTechnicians.find((t) => t.id === currentId)
+      // Normalizar IDs para comparación (convertir guiones a espacios y viceversa)
+      const normalizeId = (id: string) => id.toLowerCase().replace(/-/g, ' ').trim()
+      
+      // 1) Intentar emparejar por id exacto para técnicos fijos (considerando ambos formatos)
+      let matchFijo = fixedTechnicians.find((t) => {
+        const tIdNormalized = normalizeId(t.id)
+        const currentIdNormalized = normalizeId(currentId)
+        return tIdNormalized === currentIdNormalized || t.id === currentId
+      })
 
       // 2) Si no coincide por id, intentar por nombre (por ejemplo cuando
       // en BD quedó guardado el id como texto del nombre o similar).
       if (!matchFijo && !isPersonalExterno) {
         matchFijo = fixedTechnicians.find(
-          (t) => t.name.trim().toLowerCase() === currentNameLower || t.id === currentNameLower,
+          (t) => normalizeId(t.name) === currentNameLower || normalizeId(t.id) === currentNameLower,
         )
       }
 
@@ -209,7 +216,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
         const baseName = currentName.slice('Personal Externo - '.length).trim()
         customAssignedToValue = baseName
       } else if (matchFijo) {
-        // Coincide con uno de los técnicos de la lista: seleccionar ese id
+        // Coincide con uno de los técnicos de la lista: usar el id directamente
         assignedToValue = matchFijo.id
         customAssignedToValue = ''
       } else {

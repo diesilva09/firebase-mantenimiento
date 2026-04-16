@@ -14,6 +14,9 @@ const createOrderSchema = z.object({
   hora_inicio: z.string().optional().nullable(),
   hora_fin: z.string().optional().nullable(),
   observaciones: z.string().optional().nullable(),
+  imagen_antes_url: z.string().optional().nullable(),
+  imagen_despues_url: z.string().optional().nullable(),
+  anexo_url: z.string().optional().nullable(),
 })
 
 export async function GET() {
@@ -35,6 +38,14 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json()
+    
+    // Limpiar espacios del código de equipo
+    if (body.codigo_equipo) {
+      body.codigo_equipo = body.codigo_equipo.trim();
+    }
+    
+    console.log('Creando orden para equipo:', body.codigo_equipo);
+    
     const parsedData = createOrderSchema.parse(body)
 
     const { rows } = await query(
@@ -49,9 +60,12 @@ export async function POST(req: Request) {
          estado,
          hora_inicio,
          hora_fin,
-         observaciones
+         observaciones,
+         imagen_antes_url,
+         imagen_despues_url,
+         anexo_url
        ) VALUES (
-         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
        )
        RETURNING *`,
       [
@@ -66,6 +80,9 @@ export async function POST(req: Request) {
         parsedData.hora_inicio,
         parsedData.hora_fin,
         parsedData.observaciones,
+        parsedData.imagen_antes_url,
+        parsedData.imagen_despues_url,
+        parsedData.anexo_url,
       ],
     )
 

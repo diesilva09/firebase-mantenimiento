@@ -53,6 +53,7 @@ export function mapDatabaseTaskToFrontend(dbTask: any, users: User[]): Task {
     workDone: dbTask.trabajo_realizado,
     imageUrlBefore: dbTask.imagen_antes,
     imageUrlAfter: dbTask.imagen_despues,
+    anexoUrl: dbTask.anexo_url,
     frecuencia: dbTask.frecuencia || 'ninguna',
     intervalo: dbTask.intervalo ?? null,
     anticipacion_dias: dbTask.anticipacion_dias ?? null,
@@ -110,6 +111,8 @@ export async function completeTaskInDB(
   tipoMantenimiento?: string,
   repuestos?: string,
   observaciones?: string,
+  modoManual?: boolean,
+  anexoUrl?: string,
 ): Promise<boolean> {
   try {
     const response = await fetch('/api/tareas/completar', {
@@ -127,6 +130,8 @@ export async function completeTaskInDB(
         tipoMantenimiento,
         repuestos,
         observaciones,
+        modoManual,
+        anexoUrl,
       })
     })
 

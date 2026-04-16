@@ -7,6 +7,8 @@ const zonaSchema = z.object({
   area: z.string().optional().nullable(),
   codigo: z.string().optional().nullable(),
   nombre: z.string(),
+  imagenes_folder_url: z.string().optional().nullable(),
+  attachments_url: z.string().optional().nullable(),
 });
 
 export async function GET(req: Request) {
@@ -47,10 +49,10 @@ export async function POST(req: Request) {
     const body = await req.json();
     const data = zonaSchema.parse(body);
     const { rows } = await query(
-      `INSERT INTO zonas (tipo, area, codigo, nombre)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO zonas (tipo, area, codigo, nombre, imagenes_folder_url, attachments_url)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [data.tipo, data.area, data.codigo, data.nombre],
+      [data.tipo, data.area, data.codigo, data.nombre, data.imagenes_folder_url ?? null, data.attachments_url ?? null],
     );
     return NextResponse.json({ data: rows[0] }, { status: 201 });
   } catch (err: any) {
@@ -78,10 +80,12 @@ export async function PUT(req: Request) {
          tipo = COALESCE($1, tipo),
          area = COALESCE($2, area),
          codigo = COALESCE($3, codigo),
-         nombre = COALESCE($4, nombre)
-       WHERE id = $5
+         nombre = COALESCE($4, nombre),
+         imagenes_folder_url = COALESCE($5, imagenes_folder_url),
+         attachments_url = COALESCE($6, attachments_url)
+       WHERE id = $7
        RETURNING *`,
-      [data.tipo ?? null, data.area ?? null, data.codigo ?? null, data.nombre ?? null, Number(id)],
+      [data.tipo ?? null, data.area ?? null, data.codigo ?? null, data.nombre ?? null, data.imagenes_folder_url ?? null, data.attachments_url ?? null, Number(id)],
     );
     return NextResponse.json({ data: rows[0] });
   } catch (err: any) {

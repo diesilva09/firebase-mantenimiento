@@ -22,6 +22,7 @@ const equipoSchema = z.object({
   estado: z.string().optional().nullable(),
   imagen_url: z.string().url().optional().nullable(),
   attachments_url: z.string().optional().nullable(),
+  imagenes_folder_url: z.string().optional().nullable(),
 })
 
 export async function GET() {
@@ -46,10 +47,10 @@ export async function POST(req: Request) {
         codigo, version, nombre, area, linea, marca, modelo, fabricante,
         fecha_implementacion, fecha_adquisicion, capacidad, amperaje,
         potencia, voltaje, rpm, magnitud_medida, estado, imagen_url,
-        attachments_url
+        attachments_url, imagenes_folder_url
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        $11, $12, $13, $14, $15, $16, $17, $18, $19
+        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
       ) RETURNING *`,
       [
         data.codigo,
@@ -71,6 +72,7 @@ export async function POST(req: Request) {
         data.estado,
         data.imagen_url,
         data.attachments_url,
+        data.imagenes_folder_url,
       ],
     )
     return NextResponse.json(rows[0], { status: 201 })
@@ -119,8 +121,9 @@ export async function PUT(req: Request) {
         magnitud_medida = $16,
         estado = $17,
         imagen_url = $18,
-        attachments_url = $19
-      WHERE id = $20
+        attachments_url = $19,
+        imagenes_folder_url = $20
+      WHERE id = $21
       RETURNING *`,
       [
         data.codigo,
@@ -142,6 +145,7 @@ export async function PUT(req: Request) {
         data.estado,
         data.imagen_url,
         data.attachments_url,
+        data.imagenes_folder_url,
         Number(id),
       ],
     )

@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -14,7 +13,6 @@ import { Badge } from "@/components/ui/badge"
 import type { Task } from "@/lib/types"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
-import Image from "next/image"
 import { Edit } from "lucide-react"
 
 interface TaskDetailsDialogProps {
@@ -48,7 +46,6 @@ export function TaskDetailsDialog({
   onOpenEdit, 
   onOpenSpecs 
 }: TaskDetailsDialogProps) {
-  const [enlargedImage, setEnlargedImage] = useState<{ src: string; label: string } | null>(null)
   const executedName = task.executedBy?.name || ""
   const isExternal = executedName.startsWith("Personal Externo - ")
   const externalDisplayName = isExternal ? executedName.replace("Personal Externo - ", "").trim() : executedName
@@ -136,75 +133,49 @@ export function TaskDetailsDialog({
               </div>
             )}
 
-            {(task.imageUrlBefore || task.imageUrlAfter) && (
-              <div className="space-y-2">
-                 <span className="text-muted-foreground">Evidencia Fotográfica:</span>
-                 <div className="grid grid-cols-2 gap-4">
-                   {task.imageUrlBefore && (
-                    <div className="space-y-1">
-                      <h4 className="text-xs font-semibold text-center">Antes</h4>
-                      <button
-                        type="button"
-                        className="mx-auto block focus:outline-none focus:ring-2 focus:ring-primary rounded-md"
-                        onClick={() => setEnlargedImage({ src: task.imageUrlBefore!, label: "Antes" })}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={task.imageUrlBefore}
-                          alt="Antes"
-                          className="h-40 w-40 rounded-md object-cover border bg-muted"
-                        />
-                      </button>
-                    </div>
-                  )}
-                  {task.imageUrlAfter && (
-                    <div className="space-y-1">
-                      <h4 className="text-xs font-semibold text-center">Después</h4>
-                      <button
-                        type="button"
-                        className="mx-auto block focus:outline-none focus:ring-2 focus:ring-primary rounded-md"
-                        onClick={() => setEnlargedImage({ src: task.imageUrlAfter!, label: "Después" })}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={task.imageUrlAfter}
-                          alt="Después"
-                          className="h-40 w-40 rounded-md object-cover border bg-muted"
-                        />
-                      </button>
-                    </div>
-                  )}
-                 </div>
+            {task.imageUrlBefore && (
+              <div className="flex items-center justify-between bg-muted/50 p-2 rounded-md">
+                <span className="text-sm font-medium"> Imagen Antes</span>
+                <a
+                  href={task.imageUrlBefore}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                >
+                  Ver en Drive →
+                </a>
+              </div>
+            )}
+
+            {task.imageUrlAfter && (
+              <div className="flex items-center justify-between bg-muted/50 p-2 rounded-md">
+                <span className="text-sm font-medium"> Imagen Después</span>
+                <a
+                  href={task.imageUrlAfter}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                >
+                  Ver en Drive →
+                </a>
+              </div>
+            )}
+
+            {task.anexoUrl && (
+              <div className="flex items-center justify-between bg-muted/50 p-2 rounded-md">
+                <span className="text-sm font-medium"> Anexo</span>
+                <a
+                  href={task.anexoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                >
+                  Ver en Drive →
+                </a>
               </div>
             )}
 
         </div>
-        {enlargedImage && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-            <div className="relative max-w-3xl max-h-[90vh] bg-background rounded-md p-3 shadow-lg">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="text-sm font-semibold">Imagen {enlargedImage.label}</h4>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setEnlargedImage(null)}
-                >
-                  Cerrar
-                </Button>
-              </div>
-              <div className="flex justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={enlargedImage.src}
-                  alt={enlargedImage.label}
-                  className="max-h-[70vh] max-w-full rounded-md object-contain border bg-muted"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
         <DialogFooter className="sm:justify-start gap-2">
           {task.status !== 'Completada' && (
             <Button type="button" onClick={() => { setIsOpen(false); onOpenComplete(task); }}>

@@ -14,18 +14,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { formatPrice } from '@/lib/utils'
-import { ArrowLeft, Folder, Eye, Download, FileSpreadsheet, FileText, File, PieChart as PieChartIcon } from "lucide-react"
+import { ArrowLeft, Folder, Eye, Download, FileSpreadsheet, FileText, File, PieChart as PieChartIcon, Image as ImageIcon, ExternalLink, Trash2, X } from "lucide-react"
 import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
 import { useUser } from '@/firebase/auth/use-user'
+import { checkUserRole, UserRole } from '@/lib/role-service'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts"
 
 interface HojaVidaRow {
+  id: number
   fecha: string
   descripcion: string
   responsable: string
   repuestos: string
   tipo: string
   observaciones: string
+  imagenAntesUrl?: string | null
+  imagenDespuesUrl?: string | null
+  anexoUrl?: string | null
 }
 
 interface ParadaRow {
@@ -96,23 +101,88 @@ const [tipoFilter, setTipoFilter] = useState<string>("")
 const [startDateFilter, setStartDateFilter] = useState<string>("")
 const [endDateFilter, setEndDateFilter] = useState<string>("")
 
+// Estado para diálogo de confirmación de eliminación
+const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null)
+const [isDeleting, setIsDeleting] = useState(false)
+
+// Estado para el rol del usuario
+const [userRole, setUserRole] = useState<UserRole | null>(null)
+const { user: currentUser } = useUser()
+
 useEffect(() => {
+  const loadUserRole = async () => {
+    if (currentUser) {
+      const role = await checkUserRole(currentUser)
+      console.log('User role loaded:', role) // Debug
+      setUserRole(role)
+    }
+  }
+  loadUserRole()
+}, [currentUser])
+
+const isJefe = userRole?.role === 'JEFE'
+console.log('isJefe:', isJefe, 'role:', userRole?.role) // Debug
+
+// Función para abrir diálogo de confirmación
+const openDeleteDialog = (id: number) => {
+  setDeleteTargetId(id)
+  setDeleteDialogOpen(true)
+}
+
+// Función para cancelar eliminación
+const cancelDelete = () => {
+  setDeleteTargetId(null)
+  setDeleteDialogOpen(false)
+}
+
+// Función para confirmar eliminación
+const confirmDelete = async () => {
+  if (!deleteTargetId) return
+
+  setIsDeleting(true)
+  try {
+    const res = await fetch(`/api/equipos/historial?id=${deleteTargetId}`, {
+      method: 'DELETE',
+    })
+
+    if (res.ok) {
+      setHojaVida(prev => prev.filter(row => row.id !== deleteTargetId))
+      setDeleteDialogOpen(false)
+      setDeleteTargetId(null)
+    } else {
+      console.error('Error eliminando registro')
+    }
+  } catch (error) {
+    console.error('Error eliminando registro:', error)
+  } finally {
+    setIsDeleting(false)
+  }
+}
+
+useEffect(() => {
+  const abortController = new AbortController()
+
   const fetchHojaVida = async () => {
     try {
       setLoadingHojaVida(true)
+      console.log('Buscando hoja de vida para equipo:', codigo, '| encodeURIComponent:', encodeURIComponent(codigo));
       const res = await fetch(
-        `/api/equipos/historial?codigoEquipo=${encodeURIComponent(codigo)}`
+        `/api/equipos/historial?codigoEquipo=${encodeURIComponent(codigo)}`,
+        { signal: abortController.signal }
       )
       if (!res.ok) {
         console.warn("Error cargando hoja de vida desde equipos_historial")
-        setHojaVida([])
+        if (!abortController.signal.aborted) setHojaVida([])
         return
       }
 
       const json = await res.json()
       const data: any[] = Array.isArray(json?.data) ? json.data : []
+      console.log('Registros recibidos de equipos_historial:', data.length, 'para código:', codigo);
 
       const mapped: HojaVidaRow[] = data.map((r) => ({
+        id: r.id,
         fecha:
           typeof r.fecha_evento === "string"
             ? r.fecha_evento.slice(0, 10) // yyyy-mm-dd
@@ -122,18 +192,45 @@ useEffect(() => {
         repuestos: r.repuestos_usados ?? "",
         tipo: r.tipo_mantenimiento ?? "",
         observaciones: r.observaciones ?? "",
+        imagenAntesUrl: r.imagen_antes_url ?? null,
+        imagenDespuesUrl: r.imagen_despues_url ?? null,
+        anexoUrl: r.anexo_url ?? null,
       }))
 
-      setHojaVida(mapped)
+      // Deduplicar por contenido (fecha + descripcion + responsable) para evitar registros duplicados
+      // Si hay duplicados, conservar el que tenga los links completos
+      const uniqueByContent = new Map<string, HojaVidaRow>()
+      for (const item of mapped) {
+        const key = `${item.fecha}|${item.descripcion}|${item.responsable}`
+        const existing = uniqueByContent.get(key)
+        if (!existing) {
+          uniqueByContent.set(key, item)
+        } else {
+          // Si ya existe, quedarnos con el que tenga más datos (links)
+          const existingHasLinks = existing.imagenAntesUrl || existing.imagenDespuesUrl || existing.anexoUrl
+          const newHasLinks = item.imagenAntesUrl || item.imagenDespuesUrl || item.anexoUrl
+          if (!existingHasLinks && newHasLinks) {
+            uniqueByContent.set(key, item)
+          }
+        }
+      }
+      const deduplicated = Array.from(uniqueByContent.values())
+
+      if (!abortController.signal.aborted) setHojaVida(deduplicated)
     } catch (e) {
+      if ((e as Error).name === 'AbortError') return
       console.warn("No se pudo cargar equipos_historial", e)
-      setHojaVida([])
+      if (!abortController.signal.aborted) setHojaVida([])
     } finally {
-      setLoadingHojaVida(false)
+      if (!abortController.signal.aborted) setLoadingHojaVida(false)
     }
   }
 
   fetchHojaVida()
+
+  return () => {
+    abortController.abort()
+  }
 }, [codigo])
 
   const [startDateFilterParadas, setStartDateFilterParadas] = useState<string>("")
@@ -174,8 +271,30 @@ useEffect(() => {
   const [expandedHojaVidaIndex, setExpandedHojaVidaIndex] = useState<number | null>(null)
   const [expandedParadaIndex, setExpandedParadaIndex] = useState<number | null>(null)
 
+  // Estado para modal de detalles de hoja de vida
+  const [selectedHojaVidaRow, setSelectedHojaVidaRow] = useState<HojaVidaRow | null>(null)
+  const [isHojaVidaModalOpen, setIsHojaVidaModalOpen] = useState(false)
+
   const filteredHojaVida = useMemo(() => {
-    return hojaVida.filter((row) => {
+    // Deduplicar por contenido como medida de seguridad
+    const uniqueByContent = new Map<string, HojaVidaRow>()
+    for (const item of hojaVida) {
+      const key = `${item.fecha}|${item.descripcion}|${item.responsable}`
+      const existing = uniqueByContent.get(key)
+      if (!existing) {
+        uniqueByContent.set(key, item)
+      } else {
+        // Conservar el que tenga los links
+        const existingHasLinks = existing.imagenAntesUrl || existing.imagenDespuesUrl || existing.anexoUrl
+        const newHasLinks = item.imagenAntesUrl || item.imagenDespuesUrl || item.anexoUrl
+        if (!existingHasLinks && newHasLinks) {
+          uniqueByContent.set(key, item)
+        }
+      }
+    }
+    const deduplicated = Array.from(uniqueByContent.values())
+
+    return deduplicated.filter((row) => {
       const normalizedTipo = (row.tipo || "").toLowerCase().trim()
 
       // Filtro por tipo de mantenimiento (comparación normalizada)
@@ -375,8 +494,14 @@ useEffect(() => {
                   </tr>
                 ) : (
                   filteredHojaVida.map((row, idx) => (
-                    <React.Fragment key={`hv-${idx}`}>
-                      <tr className="border-t">
+                    <React.Fragment key={row.id}>
+                      <tr 
+                        className="border-t cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => {
+                          setSelectedHojaVidaRow(row)
+                          setIsHojaVidaModalOpen(true)
+                        }}
+                      >
                         <td className="px-2 py-1 sm:px-3 sm:py-2 align-top whitespace-nowrap">{row.fecha}</td>
                         <td className="px-2 py-1 sm:px-3 sm:py-2 align-top max-w-[140px] sm:max-w-xs truncate" title={row.descripcion}>{row.descripcion}</td>
                         <td className="px-2 py-1 sm:px-3 sm:py-2 align-top whitespace-nowrap">{row.responsable}</td>
@@ -384,17 +509,34 @@ useEffect(() => {
                         <td className="px-2 py-1 sm:px-3 sm:py-2 align-top whitespace-nowrap">{row.tipo}</td>
                         <td className="px-2 py-1 sm:px-3 sm:py-2 align-top max-w-[140px] sm:max-w-xs truncate hidden sm:table-cell" title={row.observaciones}>{row.observaciones}</td>
                         <td className="px-2 py-1 sm:px-3 sm:py-2 align-top text-right">
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-7 w-7 ml-auto"
-                            onClick={() =>
-                              setExpandedHojaVidaIndex(prev => (prev === idx ? null : idx))
-                            }
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setExpandedHojaVidaIndex(prev => (prev === idx ? null : idx))
+                              }}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            {isJefe && (
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  openDeleteDialog(row.id)
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                       {expandedHojaVidaIndex === idx && (
@@ -413,6 +555,51 @@ useEffect(() => {
                                 <span className="font-medium text-muted-foreground shrink-0">Observaciones:</span>
                                 <span className="whitespace-pre-wrap break-all">{row.observaciones || "-"}</span>
                               </div>
+                              {(row.imagenAntesUrl || row.imagenDespuesUrl || row.anexoUrl) && (
+                                <div className="flex gap-2 sm:col-span-2 pt-2 border-t mt-2">
+                                  <span className="font-medium text-muted-foreground shrink-0 flex items-center gap-1">
+                                    <ImageIcon className="h-3.5 w-3.5" /> Adjuntos:
+                                  </span>
+                                  <div className="flex flex-wrap gap-2">
+                                    {row.imagenAntesUrl && (
+                                      <a
+                                        href={row.imagenAntesUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 text-[10px] sm:text-xs"
+                                      >
+                                        <ImageIcon className="h-3 w-3" />
+                                        Imagen Antes
+                                        <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    )}
+                                    {row.imagenDespuesUrl && (
+                                      <a
+                                        href={row.imagenDespuesUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 px-2 py-1 rounded bg-green-50 text-green-700 hover:bg-green-100 text-[10px] sm:text-xs"
+                                      >
+                                        <ImageIcon className="h-3 w-3" />
+                                        Imagen Después
+                                        <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    )}
+                                    {row.anexoUrl && (
+                                      <a
+                                        href={row.anexoUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 px-2 py-1 rounded bg-orange-50 text-orange-700 hover:bg-orange-100 text-[10px] sm:text-xs"
+                                      >
+                                        <FileText className="h-3 w-3" />
+                                        Archivo Anexo
+                                        <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -571,6 +758,171 @@ useEffect(() => {
           </div>
         </div>
       )}
+
+      {/* Diálogo de confirmación para eliminar registro de hoja de vida */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 className="h-5 w-5" />
+              Eliminar Registro de Hoja de Vida
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              ¿Estás seguro de que deseas eliminar este registro de la hoja de vida? Esta acción no se puede deshacer.
+            </p>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={cancelDelete}
+              disabled={isDeleting}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={isDeleting}
+              className="gap-2"
+            >
+              {isDeleting ? (
+                <>
+                  <div className="h-4 w-4 animate-spin rounded-full border border-current border-t-transparent" />
+                  Eliminando...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4" />
+                  Eliminar
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de detalles de registro de hoja de vida */}
+      <Dialog open={isHojaVidaModalOpen} onOpenChange={setIsHojaVidaModalOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-blue-600" />
+              Detalle del Registro de Hoja de Vida
+            </DialogTitle>
+          </DialogHeader>
+          {selectedHojaVidaRow && (
+            <div className="space-y-4 py-4">
+              {/* Fecha y Tipo */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Fecha</Label>
+                  <p className="font-medium">{selectedHojaVidaRow.fecha}</p>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Tipo de Mantenimiento</Label>
+                  <p className="font-medium">
+                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                      selectedHojaVidaRow.tipo === 'Correctivo' ? 'bg-red-100 text-red-700' :
+                      selectedHojaVidaRow.tipo === 'Preventivo' ? 'bg-blue-100 text-blue-700' :
+                      selectedHojaVidaRow.tipo === 'Rutinario' ? 'bg-amber-100 text-amber-700' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>
+                      {selectedHojaVidaRow.tipo || 'No especificado'}
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Responsable */}
+              <div className="space-y-1">
+                <Label className="text-muted-foreground text-xs">Responsable / Ejecutado por</Label>
+                <p className="font-medium">{selectedHojaVidaRow.responsable || '-'}</p>
+              </div>
+
+              {/* Descripción del trabajo */}
+              <div className="space-y-1">
+                <Label className="text-muted-foreground text-xs">Descripción del Trabajo</Label>
+                <div className="bg-muted/50 p-3 rounded-md">
+                  <p className="whitespace-pre-wrap text-sm">{selectedHojaVidaRow.descripcion || '-'}</p>
+                </div>
+              </div>
+
+              {/* Repuestos usados */}
+              <div className="space-y-1">
+                <Label className="text-muted-foreground text-xs">Repuestos o Materiales Usados</Label>
+                <div className="bg-muted/50 p-3 rounded-md">
+                  <p className="whitespace-pre-wrap text-sm">{selectedHojaVidaRow.repuestos || '-'}</p>
+                </div>
+              </div>
+
+              {/* Observaciones */}
+              {selectedHojaVidaRow.observaciones && (
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Observaciones</Label>
+                  <div className="bg-muted/50 p-3 rounded-md">
+                    <p className="whitespace-pre-wrap text-sm">{selectedHojaVidaRow.observaciones}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Links a imágenes y anexos */}
+              {(selectedHojaVidaRow.imagenAntesUrl || selectedHojaVidaRow.imagenDespuesUrl || selectedHojaVidaRow.anexoUrl) && (
+                <div className="space-y-2 pt-2 border-t">
+                  <Label className="text-muted-foreground text-xs flex items-center gap-1">
+                    <ImageIcon className="h-3.5 w-3.5" />
+                    Evidencia Fotográfica y Anexos
+                  </Label>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedHojaVidaRow.imagenAntesUrl && (
+                      <a
+                        href={selectedHojaVidaRow.imagenAntesUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 text-sm font-medium"
+                      >
+                        <ImageIcon className="h-4 w-4" />
+                        Imagen Antes
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    )}
+                    {selectedHojaVidaRow.imagenDespuesUrl && (
+                      <a
+                        href={selectedHojaVidaRow.imagenDespuesUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-green-50 text-green-700 hover:bg-green-100 text-sm font-medium"
+                      >
+                        <ImageIcon className="h-4 w-4" />
+                        Imagen Después
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    )}
+                    {selectedHojaVidaRow.anexoUrl && (
+                      <a
+                        href={selectedHojaVidaRow.anexoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-orange-50 text-orange-700 hover:bg-orange-100 text-sm font-medium"
+                      >
+                        <FileText className="h-4 w-4" />
+                        Archivo Anexo
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsHojaVidaModalOpen(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

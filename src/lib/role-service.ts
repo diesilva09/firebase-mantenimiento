@@ -16,11 +16,6 @@ export async function checkUserRole(user: User | null): Promise<UserRole> {
     return { isAdmin: false, role: 'NONE', permissions: [] };
   }
 
-  // Si el usuario no ha verificado su correo, no otorgar ningún rol
-  if (!user.emailVerified) {
-    return { isAdmin: false, role: 'NONE', permissions: [] };
-  }
-
   try {
     // Verificar roles desde el backend
     const response = await fetch('/api/auth/role', {

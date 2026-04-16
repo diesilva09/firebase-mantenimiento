@@ -13,6 +13,7 @@ export function DashboardHeader() {
   const pathname = usePathname()
   const { query, setQuery, suggestions, /* highlightedSuggestionId, */ setHighlightedSuggestionId } = useDashboardSearch()
   const [hoveredSuggestionId, setHoveredSuggestionId] = useState<string | null>(null)
+  const [selectedIndex, setSelectedIndex] = useState<number>(-1)
 
   const [showSuggestions, setShowSuggestions] = useState(false)
 
@@ -61,8 +62,14 @@ export function DashboardHeader() {
   useEffect(() => {
     if (!showSuggestions) {
       setHoveredSuggestionId(null)
+      setSelectedIndex(-1)
     }
   }, [showSuggestions])
+
+  // Reset selected index when filtered suggestions change
+  useEffect(() => {
+    setSelectedIndex(-1)
+  }, [filteredSuggestions])
 
   const handleSelectSuggestion = (label: string, route?: string, id?: string) => {
     setQuery(label)
@@ -97,6 +104,7 @@ export function DashboardHeader() {
               onChange={(e) => {
                 setQuery(e.target.value)
                 setShowSuggestions(true)
+                setSelectedIndex(-1)
               }}
               onFocus={() => {
                 if (query.trim()) setShowSuggestions(true)
@@ -105,13 +113,28 @@ export function DashboardHeader() {
                 // Dar tiempo a hacer click en sugerencia
                 setTimeout(() => setShowSuggestions(false), 150)
               }}
-                onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  const first = filteredSuggestions[0]
-                  if (first) {
-                    e.preventDefault()
-                    handleSelectSuggestion(first.label, first.route, first.id)
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setSelectedIndex((prev) =>
+                    prev < filteredSuggestions.length - 1 ? prev + 1 : prev
+                  )
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setSelectedIndex((prev) => (prev > 0 ? prev - 1 : -1))
+                } else if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (selectedIndex >= 0 && filteredSuggestions[selectedIndex]) {
+                    const selected = filteredSuggestions[selectedIndex]
+                    handleSelectSuggestion(selected.label, selected.route, selected.id)
+                  } else {
+                    const first = filteredSuggestions[0]
+                    if (first) {
+                      handleSelectSuggestion(first.label, first.route, first.id)
+                    }
                   }
+                } else if (e.key === 'Escape') {
+                  setShowSuggestions(false)
                 }
               }}
               className="w-full appearance-none bg-background pl-8 shadow-none md:w-2/3 lg:w-1/3"
@@ -119,16 +142,21 @@ export function DashboardHeader() {
 
             {showSuggestions && filteredSuggestions.length > 0 && (
               <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-popover text-xs shadow-md">
-                {filteredSuggestions.map((s) => (
+                {filteredSuggestions.map((s, index) => (
                   <button
                     key={s.id}
                     type="button"
-                    className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
+                    className={`flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent ${
+                      index === selectedIndex ? 'bg-accent' : ''
+                    } ${hoveredSuggestionId === s.id ? 'bg-accent/70' : ''}`}
                     onMouseDown={(ev) => {
                       ev.preventDefault()
                       handleSelectSuggestion(s.label, s.route, s.id)
                     }}
-                    onMouseEnter={() => setHoveredSuggestionId(s.id)}
+                    onMouseEnter={() => {
+                      setHoveredSuggestionId(s.id)
+                      setSelectedIndex(index)
+                    }}
                     onMouseLeave={() => setHoveredSuggestionId(null)}
                   >
                     <span className="font-medium">{s.label}</span>

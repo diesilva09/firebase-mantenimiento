@@ -65,6 +65,7 @@ const equipmentSchema = z.object({
   magnitudMedida: z.string().max(50, "La magnitud medida es muy larga").optional(),
   estado: z.enum(["Operativo", "En mantenimiento", "Fuera de servicio", "En backup"]).optional(),
   attachmentsUrl: z.string().optional().nullable(),
+  imagenesFolderUrl: z.string().optional().nullable(),
 })
 
 type EquipmentForm = z.infer<typeof equipmentSchema>
@@ -227,6 +228,7 @@ export default function EquiposPage() {
       magnitudMedida: "",
       estado: "Operativo",
       attachmentsUrl: "",
+      imagenesFolderUrl: "",
     },
   })
 
@@ -759,6 +761,7 @@ export default function EquiposPage() {
                   magnitudMedida: "",
                   estado: "Operativo",
                   attachmentsUrl: "",
+                  imagenesFolderUrl: "",
                 })
                 setView("form")
               }}
@@ -1038,6 +1041,23 @@ export default function EquiposPage() {
                         />
                       </FormControl>
                       <FormMessage />
+                      <p className="text-xs text-muted-foreground">
+                        Carpeta donde se guardan los anexos del equipo (manuales, certificados, etc.)
+                      </p>
+                    </FormItem>
+
+                    <FormItem>
+                      <FormLabel>URL carpeta Drive de imágenes</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Pega aquí la URL de la carpeta para imágenes de mantenimiento"
+                          {...form.register("imagenesFolderUrl")}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                      <p className="text-xs text-muted-foreground">
+                        Carpeta donde se guardarán las imágenes antes/después de las tareas de mantenimiento
+                      </p>
                     </FormItem>
                   </div>
 
@@ -1358,6 +1378,7 @@ export default function EquiposPage() {
                                                 magnitudMedida: e.magnitudMedida ?? null,
                                                 estado: e.estado ?? "Operativo",
                                                 attachmentsUrl: e.attachmentsUrl ?? null,
+                                                imagenesFolderUrl: e.imagenesFolderUrl ?? null,
                                               })
                                             }}
                                           >

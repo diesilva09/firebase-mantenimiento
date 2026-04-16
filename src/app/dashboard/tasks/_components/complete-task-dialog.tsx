@@ -1,11 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
-import Image from "next/image"
-import { Upload } from "lucide-react"
+import { Link, AlertCircle, FolderOpen, ExternalLink, Image as ImageIcon, FileText, Folder } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -28,6 +27,8 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { TechnicianSelectField } from "@/app/dashboard/forms/_components/technician-select-field"
 import type { Task, User } from "@/lib/types"
 import { useToast } from "@/hooks/use-toast"
@@ -44,20 +45,9 @@ const completeSchema = z
     repuestos: z.string().optional().default(""),
     observaciones: z.string().optional().default(""),
     executionDate: z.date({ required_error: "Selecciona la fecha de ejecución." }),
-    imageBefore: z.any()
-      .optional()
-      .refine((file) => !file || file.size <= MAX_FILE_SIZE, `El tamaño máximo es 4MB.`)
-      .refine(
-        (file) => !file || ACCEPTED_IMAGE_TYPES.includes(file.type),
-        "Solo se aceptan formatos .jpg, .jpeg, .png y .webp."
-      ),
-    imageAfter: z.any()
-      .optional()
-      .refine((file) => !file || file.size <= MAX_FILE_SIZE, `El tamaño máximo es 4MB.`)
-      .refine(
-        (file) => !file || ACCEPTED_IMAGE_TYPES.includes(file.type),
-        "Solo se aceptan formatos .jpg, .jpeg, .png y .webp."
-      ),
+    imageBeforeUrl: z.string().url().optional().or(z.literal("")),
+    imageAfterUrl: z.string().url().optional().or(z.literal("")),
+    anexoUrl: z.string().url().optional().or(z.literal("")),
   })
   .refine(
     (data) => (
@@ -88,43 +78,64 @@ interface CompleteTaskDialogProps {
     repuestos?: string,
     observaciones?: string,
     executionDateIso?: string,
+    modoManual?: boolean,
+    anexoUrl?: string,
   ) => Promise<boolean>
+}
+
+interface EquipoInfo {
+  imagenesFolderUrl?: string | null
+  attachmentsUrl?: string | null
 }
 
 export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete }: CompleteTaskDialogProps) {
   const { toast } = useToast()
-  const [previewBefore, setPreviewBefore] = useState<string | null>(null);
-  const [previewAfter, setPreviewAfter] = useState<string | null>(null);
+  const [equipoInfo, setEquipoInfo] = useState<EquipoInfo | null>(null);
+  const [loadingEquipo, setLoadingEquipo] = useState(false);
+
+  // Cargar información del equipo cuando se abre el diálogo
+  useEffect(() => {
+    if (isOpen && task.code) {
+      const loadEquipoInfo = async () => {
+        setLoadingEquipo(true);
+        try {
+          const res = await fetch('/api/equipos');
+          if (res.ok) {
+            const json = await res.json();
+            const equipos = json.data || [];
+            const equipo = equipos.find((e: any) => e.codigo === task.code);
+            if (equipo) {
+              setEquipoInfo({
+                imagenesFolderUrl: equipo.imagenes_folder_url,
+                attachmentsUrl: equipo.attachments_url,
+              });
+            }
+          }
+        } catch (error) {
+          console.warn('Error cargando info del equipo:', error);
+        } finally {
+          setLoadingEquipo(false);
+        }
+      };
+      loadEquipoInfo();
+    }
+  }, [isOpen, task.code]);
 
   const form = useForm<CompleteFormValues>({
     resolver: zodResolver(completeSchema),
     defaultValues: {
       workDone: "",
-      // Sin técnico por defecto para que se vea el placeholder "Ejecutado por..."
       executedById: "",
       customExecutedBy: "",
       tipoMantenimiento: "",
       repuestos: "",
       observaciones: "",
       executionDate: new Date(),
+      imageBeforeUrl: "",
+      imageAfterUrl: "",
+      anexoUrl: "",
     },
   })
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, fieldName: "imageBefore" | "imageAfter") => {
-    const file = e.target.files?.[0];
-    if (file) {
-      form.setValue(fieldName, file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (fieldName === 'imageBefore') {
-          setPreviewBefore(reader.result as string);
-        } else {
-          setPreviewAfter(reader.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
   
   const resetDialog = () => {
     form.reset({
@@ -134,12 +145,12 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
       tipoMantenimiento: "",
       repuestos: "",
       observaciones: "",
-      imageBefore: undefined,
-      imageAfter: undefined,
       executionDate: new Date(),
+      imageBeforeUrl: "",
+      imageAfterUrl: "",
+      anexoUrl: "",
     });
-    setPreviewBefore(null);
-    setPreviewAfter(null);
+    setEquipoInfo(null);
   }
 
   async function onSubmit(data: CompleteFormValues) {
@@ -186,16 +197,22 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
 
     const executionIso = data.executionDate.toISOString();
 
+    // Siempre usamos modo manual - las URLs de Drive ingresadas por el usuario
+    const imageBeforeToSend = data.imageBeforeUrl || undefined;
+    const imageAfterToSend = data.imageAfterUrl || undefined;
+
     const success = await onComplete(
       task.id,
       data.workDone,
       executedByUser,
-      previewBefore ?? undefined,
-      previewAfter ?? undefined,
+      imageBeforeToSend,
+      imageAfterToSend,
       data.tipoMantenimiento,
       data.repuestos ?? "",
       data.observaciones ?? "",
       executionIso,
+      true, // Siempre modo manual
+      data.anexoUrl || undefined,
     )
     if (success) {
       toast({
@@ -372,58 +389,147 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
               )}
             />
 
-            {/* No embedded locative form - keep dialog consistent with other schedules */}
+            {/* Sección de Imágenes */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium flex items-center gap-2">
+                <FolderOpen className="h-4 w-4" />
+                Imágenes de Evidencia (Antes/Después)
+              </h3>
+
+              {/* Estado de la carpeta de imágenes del equipo */}
+              {loadingEquipo ? (
+                <Alert className="bg-gray-50 border-gray-200">
+                  <AlertDescription className="text-sm">Cargando información del equipo...</AlertDescription>
+                </Alert>
+              ) : equipoInfo?.imagenesFolderUrl ? (
+                <Alert className="bg-green-50 border-green-200">
+                  <FolderOpen className="h-4 w-4 text-green-600" />
+                  <AlertDescription className="text-sm text-green-800">
+                    <strong>Carpeta de imágenes configurada:</strong>
+                    <a
+                      href={equipoInfo.imagenesFolderUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 ml-2 text-green-700 hover:underline"
+                    >
+                      Abrir carpeta <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert variant="default" className="bg-yellow-50 border-yellow-200">
+                  <AlertCircle className="h-4 w-4 text-yellow-600" />
+                  <AlertDescription className="text-sm text-yellow-800">
+                    <strong>Sin carpeta configurada:</strong> Sube las imágenes a cualquier carpeta de Drive y pega los links aquí.
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Link Imagen Antes */}
               <FormField
                 control={form.control}
-                name="imageBefore"
+                name="imageBeforeUrl"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel className="flex items-center gap-2">
-                      <Upload className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                      Imagen (Antes)
+                      <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                      Link de Drive - Imagen Antes
                     </FormLabel>
                     <FormControl>
-                      <Input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 'imageBefore')} />
+                      <Input
+                        placeholder="https://drive.google.com/file/d/..."
+                        {...field}
+                      />
                     </FormControl>
-                    {previewBefore && (
-                      <div className="mt-2 h-40 w-40 overflow-hidden rounded-md border bg-muted flex items-center justify-center">
-                        <Image
-                          src={previewBefore}
-                          alt="Vista previa Antes"
-                          width={160}
-                          height={160}
-                          className="object-cover"
-                        />
-                      </div>
-                    )}
+                    <FormDescription className="text-xs">
+                      Pega el link de la imagen ya subida a Drive
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+
+              {/* Link Imagen Después */}
               <FormField
                 control={form.control}
-                name="imageAfter"
+                name="imageAfterUrl"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel className="flex items-center gap-2">
-                      <Upload className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                      Imagen (Después)
+                      <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                      Link de Drive - Imagen Después
                     </FormLabel>
                     <FormControl>
-                      <Input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 'imageAfter')} />
+                      <Input
+                        placeholder="https://drive.google.com/file/d/..."
+                        {...field}
+                      />
                     </FormControl>
-                    {previewAfter && (
-                      <div className="mt-2 h-40 w-40 overflow-hidden rounded-md border bg-muted flex items-center justify-center">
-                        <Image
-                          src={previewAfter}
-                          alt="Vista previa Después"
-                          width={160}
-                          height={160}
-                          className="object-cover"
-                        />
-                      </div>
-                    )}
+                    <FormDescription className="text-xs">
+                      Pega el link de la imagen ya subida a Drive
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            {/* Sección de Anexos */}
+            <div className="space-y-3 pt-4 border-t">
+              <h3 className="text-sm font-medium flex items-center gap-2">
+                <FileText className="h-4 w-4" />
+                Adjuntar Archivo (Anexo)
+              </h3>
+
+              {/* Estado de la carpeta de anexos del equipo */}
+              {loadingEquipo ? (
+                <Alert className="bg-gray-50 border-gray-200">
+                  <AlertDescription className="text-sm">Cargando información del equipo...</AlertDescription>
+                </Alert>
+              ) : equipoInfo?.attachmentsUrl ? (
+                <Alert className="bg-blue-50 border-blue-200">
+                  <Folder className="h-4 w-4 text-blue-600" />
+                  <AlertDescription className="text-sm text-blue-800">
+                    <strong>Carpeta de anexos configurada:</strong>
+                    <a
+                      href={equipoInfo.attachmentsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 ml-2 text-blue-700 hover:underline"
+                    >
+                      Abrir carpeta <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert variant="default" className="bg-yellow-50 border-yellow-200">
+                  <AlertCircle className="h-4 w-4 text-yellow-600" />
+                  <AlertDescription className="text-sm text-yellow-800">
+                    <strong>Sin carpeta de anexos:</strong> Sube el archivo a cualquier carpeta de Drive y pega el link aquí.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              <FormField
+                control={form.control}
+                name="anexoUrl"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center gap-2">
+                      <Link className="h-4 w-4 text-muted-foreground" />
+                      Link de Drive - Archivo Anexo
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="https://drive.google.com/file/d/..."
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription className="text-xs">
+                      Pega el link del archivo (PDF, Word, Excel, etc.) ya subido a Drive
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

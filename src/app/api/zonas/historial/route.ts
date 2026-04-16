@@ -21,11 +21,17 @@ export async function POST(req: Request) {
       observaciones,
       ejecutadoPor,
       creadoPor,
+      imagenAntesUrl,
+      imagenDespuesUrl,
+      anexoUrl,
     } = body || {};
 
     if (!codigoZona || !labor) {
       return NextResponse.json({ error: "codigoZona y labor son requeridos" }, { status: 400 });
     }
+
+    const codigoZonaTrimmed = codigoZona.trim();
+    console.log('Guardando en zonas_historial - codigo_zona:', codigoZonaTrimmed);
 
     const values: any[] = [];
     const columns: string[] = [];
@@ -39,7 +45,7 @@ export async function POST(req: Request) {
       }
     };
 
-    pushField("codigo_zona", codigoZona);
+    pushField("codigo_zona", codigoZonaTrimmed);
     pushField("tarea_id", tareaId ? Number(tareaId) : null);
     pushField("fecha_evento", fechaEvento || new Date().toISOString());
     pushField("labor", labor);
@@ -48,6 +54,9 @@ export async function POST(req: Request) {
     pushField("observaciones", observaciones ?? null);
     pushField("ejecutado_por", ejecutadoPor ?? null);
     pushField("creado_por", creadoPor ?? null);
+    pushField("imagen_antes_url", imagenAntesUrl ?? null);
+    pushField("imagen_despues_url", imagenDespuesUrl ?? null);
+    pushField("anexo_url", anexoUrl ?? null);
 
     const sql = `
       INSERT INTO zonas_historial (${columns.join(", ")})
@@ -79,6 +88,9 @@ export async function GET(req: Request) {
       return NextResponse.json({ data: [], message: "codigoZona requerido" }, { status: 400 });
     }
 
+    const codigoZonaTrimmed = codigoZona.trim();
+    console.log('Buscando historial para zona:', codigoZona, '| Trimmed:', codigoZonaTrimmed);
+
     const { rows } = await query(
       `
       SELECT
@@ -92,17 +104,53 @@ export async function GET(req: Request) {
         observaciones,
         ejecutado_por,
         creado_por,
+        imagen_antes_url,
+        imagen_despues_url,
+        anexo_url,
         created_at
       FROM zonas_historial
-      WHERE codigo_zona = $1
+      WHERE TRIM(codigo_zona) = $1
       ORDER BY fecha_evento DESC, id DESC
       `,
-      [codigoZona]
+      [codigoZonaTrimmed]
     );
+
+    console.log('Registros encontrados:', rows.length, 'para zona:', codigoZonaTrimmed);
 
     return NextResponse.json({ data: rows });
   } catch (err) {
     console.error("Error consultando zonas_historial:", err);
     return NextResponse.json({ error: "Error consultando zonas_historial" }, { status: 500 });
+  }
+}
+
+// DELETE /api/zonas/historial?id=123
+// Elimina un registro de hoja de vida de zona
+export async function DELETE(req: Request) {
+  if (!process.env.DATABASE_URL) {
+    return NextResponse.json({ error: "Base de datos no configurada" }, { status: 500 });
+  }
+
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json({ error: "ID requerido" }, { status: 400 });
+    }
+
+    const { rows } = await query(
+      'DELETE FROM zonas_historial WHERE id = $1 RETURNING *',
+      [Number(id)],
+    );
+
+    if (rows.length === 0) {
+      return NextResponse.json({ error: "Registro no encontrado" }, { status: 404 });
+    }
+
+    return NextResponse.json({ data: rows[0], message: "Registro eliminado" });
+  } catch (err) {
+    console.error("Error eliminando registro de zonas_historial:", err);
+    return NextResponse.json({ error: "Error eliminando registro" }, { status: 500 });
   }
 }

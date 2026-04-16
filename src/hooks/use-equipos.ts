@@ -26,12 +26,14 @@ interface EquipmentForm {
   magnitudMedida?: string
   estado?: EquipmentStatus
   attachmentsUrl?: string
+  imagenesFolderUrl?: string
 }
 
 interface StoredEquipment extends Omit<EquipmentForm, "image"> {
   id: string
   imageDataUrl?: string | null
   attachmentsUrl?: string
+  imagenesFolderUrl?: string
 }
 
 export function useEquipos() {
@@ -76,6 +78,7 @@ export function useEquipos() {
         estado: (row.estado as EquipmentStatus) ?? 'Operativo',
         imageDataUrl: row.imagen_url ?? null,
         attachmentsUrl: row.attachments_url ?? '',
+        imagenesFolderUrl: row.imagenes_folder_url ?? '',
       }))
 
       setEquipos(fromDb)
@@ -138,6 +141,7 @@ export function useEquipos() {
           estado: equipoData.estado ?? 'Operativo',
           imagen_url: imageDataUrl ?? null,
           attachmentsUrl: equipoData.attachmentsUrl ?? null,
+          imagenesFolderUrl: equipoData.imagenesFolderUrl ?? null,
         }),
       })
 
@@ -167,6 +171,7 @@ export function useEquipos() {
         estado: equipoData.estado ?? 'Operativo',
         imageDataUrl: imageDataUrl ?? null,
         attachmentsUrl: equipoData.attachmentsUrl ?? '',
+        imagenesFolderUrl: equipoData.imagenesFolderUrl ?? '',
       }
 
       await loadEquipos()
@@ -209,6 +214,7 @@ export function useEquipos() {
         imageDataUrl: imageDataUrl !== undefined ? imageDataUrl : currentEquipo.imageDataUrl,
         estado: equipoData.estado ?? currentEquipo.estado ?? 'Operativo',
         attachmentsUrl: equipoData.attachmentsUrl ?? currentEquipo.attachmentsUrl,
+        imagenesFolderUrl: equipoData.imagenesFolderUrl ?? currentEquipo.imagenesFolderUrl,
       }
 
       // Actualizar en API
@@ -237,6 +243,7 @@ export function useEquipos() {
           estado: equipoData.estado ?? currentEquipo.estado ?? 'Operativo',
           imagen_url: imageDataUrl !== undefined ? imageDataUrl : currentEquipo.imageDataUrl ?? null,
           attachments_url: equipoData.attachmentsUrl ?? currentEquipo.attachmentsUrl ?? null,
+          imagenes_folder_url: equipoData.imagenesFolderUrl ?? currentEquipo.imagenesFolderUrl ?? null,
         }),
       })
 

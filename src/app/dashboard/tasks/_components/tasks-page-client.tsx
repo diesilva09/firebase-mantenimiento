@@ -432,6 +432,8 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
     repuestos?: string,
     observaciones?: string,
     executionDateIso?: string,
+    modoManual?: boolean,
+    anexoUrl?: string,
   ): Promise<boolean> => {
     try {
       const success = await completeTaskInDB(
@@ -444,6 +446,8 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         tipoMantenimiento,
         repuestos,
         observaciones,
+        modoManual,
+        anexoUrl,
       );
       if (success) {
         const completionIso = executionDateIso || new Date().toISOString();

@@ -59,6 +59,8 @@ interface Zona {
   area: string | null;
   codigo: string | null;
   nombre: string;
+  imagenes_folder_url?: string | null;
+  attachments_url?: string | null;
 }
 
 export function ZonasPageClient() {
@@ -76,9 +78,12 @@ export function ZonasPageClient() {
   const [codigo, setCodigo] = useState("");
   const [nombre, setNombre] = useState("");
   const [areaInput, setAreaInput] = useState("");
+  const [imagenesFolderUrl, setImagenesFolderUrl] = useState("");
+  const [attachmentsUrl, setAttachmentsUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [zonas, setZonas] = useState<Zona[]>([]);
   const [loadingZonas, setLoadingZonas] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(""); // Búsqueda por código o nombre
   const [editingZona, setEditingZona] = useState<Zona | null>(null);
 
   const { user } = useUser();
@@ -302,6 +307,14 @@ export function ZonasPageClient() {
 
     // Coincidencia exacta o parcial (para casos como "cuarto de maquinas xxx")
     return zonaArea === selectedArea || zonaArea.includes(selectedArea);
+  }).filter((z) => {
+    // Filtro adicional por código o nombre
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.trim().toLowerCase();
+    return (
+      (z.codigo ?? "").toLowerCase().includes(q) ||
+      z.nombre.toLowerCase().includes(q)
+    );
   });
 
   const handleOpenDialog = () => {
@@ -309,6 +322,8 @@ export function ZonasPageClient() {
     setCodigo("");
     setNombre("");
     setAreaInput(area ?? ""); // si hay área seleccionada, la sugerimos
+    setImagenesFolderUrl("");
+    setAttachmentsUrl("");
     setIsDialogOpen(true);
   };
 
@@ -339,6 +354,8 @@ export function ZonasPageClient() {
         area: areaInput || null,
         codigo: codigo || null,
         nombre: nombre.trim(),
+        imagenes_folder_url: imagenesFolderUrl || null,
+        attachments_url: attachmentsUrl || null,
       };
 
       const method = editingZona ? "PUT" : "POST";
@@ -395,6 +412,8 @@ export function ZonasPageClient() {
     setCodigo(zona.codigo || "");
     setNombre(zona.nombre || "");
     setAreaInput(zona.area || "");
+    setImagenesFolderUrl(zona.imagenes_folder_url || "");
+    setAttachmentsUrl(zona.attachments_url || "");
     setTipo(zona.tipo); // cambia la pestaña si hace falta
     setIsDialogOpen(true);
   };
@@ -491,6 +510,14 @@ export function ZonasPageClient() {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="flex-1 max-w-md">
+            <Input
+              placeholder="Buscar por código o nombre..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9"
+            />
           </div>
         </div>
 
@@ -765,6 +792,36 @@ export function ZonasPageClient() {
                 onChange={(e) => setNombre(e.target.value)}
                 required
               />
+            </div>
+
+            <div className="space-y-2 pt-2 border-t">
+              <Label htmlFor="zona-imagenes-folder" className="flex items-center gap-2">
+                <span>Carpeta de Imágenes (Drive)</span>
+              </Label>
+              <Input
+                id="zona-imagenes-folder"
+                placeholder="https://drive.google.com/drive/folders/..."
+                value={imagenesFolderUrl}
+                onChange={(e) => setImagenesFolderUrl(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                URL de la carpeta de Google Drive para imágenes de evidencia
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="zona-attachments-folder" className="flex items-center gap-2">
+                <span>Carpeta de Anexos (Drive)</span>
+              </Label>
+              <Input
+                id="zona-attachments-folder"
+                placeholder="https://drive.google.com/drive/folders/..."
+                value={attachmentsUrl}
+                onChange={(e) => setAttachmentsUrl(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                URL de la carpeta de Google Drive para archivos anexos
+              </p>
             </div>
           </div>
 

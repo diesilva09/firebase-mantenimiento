@@ -325,7 +325,8 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
     return zonas
       .filter((z) =>
         (z.area ?? "").toLowerCase().includes(q) ||
-        z.nombre.toLowerCase().includes(q)
+        z.nombre.toLowerCase().includes(q) ||
+        (z.codigo ?? "").toLowerCase().includes(q)
       )
       .slice(0, 10);
   }, [areaQuery, zonas]);
@@ -336,7 +337,8 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
     return zonas
       .filter((z) =>
         (z.area ?? "").toLowerCase().includes(q) ||
-        z.nombre.toLowerCase().includes(q)
+        z.nombre.toLowerCase().includes(q) ||
+        (z.codigo ?? "").toLowerCase().includes(q)
       )
       .slice(0, 10);
   }, [codeQuery, zonas]);
