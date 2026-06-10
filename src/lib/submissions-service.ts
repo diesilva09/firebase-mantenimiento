@@ -1,6 +1,12 @@
 // lib/submissions-service.ts - VERSIÓN COMPLETA CON LOGS
 import { Submission, FormMetadata } from './types';
 
+// Helper para formatear fecha
+function formatDate(dateString: string | null | undefined): string {
+  if (!dateString) return '-';
+  return dateString.split('T')[0]; // Extraer solo YYYY-MM-DD
+}
+
 // 1. Ordenes de Mantenimiento
 async function fetchOrdenesMantenimiento(): Promise<Submission[]> {
   try {
@@ -18,7 +24,7 @@ async function fetchOrdenesMantenimiento(): Promise<Submission[]> {
         'Número Orden': item.numero_orden,
         'Equipo': item.codigo_equipo || item.equipo_nombre,
         'Tipo Mantenimiento': item.tipo_mantenimiento,
-        'Fecha Solicitud': item.fecha_solicitud,
+        'Fecha Ejecución': formatDate(item.fecha_solicitud),
         'Hora Inicio': item.hora_inicio,
         'Hora Fin': item.hora_fin,
         'Responsable': item.responsable,
@@ -148,6 +154,7 @@ async function fetchEquipmentInspections(): Promise<Submission[]> {
       formTitle: 'Inspecciones de Equipos',
       submittedAt: item.created_at || new Date().toISOString(),
       data: {
+        'Fecha Inspección': item.fecha_inspeccion,
         'Equipo': item.equipo,
         'Responsable': item.responsable,
         'Tipo Inspección': item.tipo_inspeccion,
@@ -175,6 +182,7 @@ async function fetchSparesRequests(): Promise<Submission[]> {
       formTitle: 'Solicitudes de Repuestos',
       submittedAt: item.created_at || new Date().toISOString(),
       data: {
+        'Fecha Solicitud': item.fecha_solicitud,
         'Repuesto': item.repuesto,
         'Cantidad': item.cantidad,
         'Máquina': item.maquina,
@@ -208,6 +216,117 @@ export async function getAllSubmissions(): Promise<Submission[]> {
   } catch (error) {
     console.error('❌ [getAllSubmissions] Error:', error);
     return [];
+  }
+}
+
+// Función para actualizar una submission
+export async function updateSubmission(form: string, id: string, data: Record<string, any>): Promise<boolean> {
+  try {
+    let endpoint = '';
+    let payload = { ...data };
+    
+    // Extraer el ID numérico del formato "prefix-id"
+    const numericId = id.includes('-') ? id.split('-')[1] : id;
+    
+    switch (form) {
+      case 'ordenes-mantenimiento':
+        endpoint = `/api/ordenes-mantenimiento?id=${numericId}`;
+        payload = {
+          codigo_equipo: data['Equipo'],
+          tipo_mantenimiento: data['Tipo Mantenimiento'],
+          fecha_ejecucion: data['Fecha Ejecución'],
+          responsable: data['Responsable'],
+          descripcion_falla: data['Descripción del trabajo realizado'],
+          repuestos_utilizados: data['Repuestos Utilizados'],
+          prioridad: data['Prioridad'],
+          estado: data['Estado'],
+          hora_inicio: data['Hora Inicio'],
+          hora_fin: data['Hora Fin'],
+          observaciones: data['Observaciones / Recomendaciones'],
+          imagen_antes_url: data['Imagen Antes URL'] || null,
+          imagen_despues_url: data['Imagen Después URL'] || null,
+          anexo_url: data['Anexo URL'] || null,
+        };
+        break;
+      case 'equipment-inspections':
+        endpoint = `/api/equipment-inspections?id=${numericId}`;
+        payload = {
+          equipo: data['Equipo'],
+          responsable: data['Responsable'],
+          tipoInspeccion: data['Tipo Inspección'],
+          estado: data['Estado'],
+          observaciones: data['Observaciones'],
+          fechaInspeccion: data['Fecha Inspección'],
+        };
+        break;
+      case 'spares-requests':
+        endpoint = `/api/spares-requests?id=${numericId}`;
+        payload = {
+          repuesto: data['Repuesto'],
+          cantidad: parseInt(data['Cantidad']) || 1,
+          maquina: data['Máquina'],
+          locativo: data['Locativo'],
+          tecnico: data['Técnico'],
+          fechaSolicitud: data['Fecha Solicitud'],
+        };
+        break;
+      default:
+        console.warn(`❌ [updateSubmission] Formulario no soportado: ${form}`);
+        return false;
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Error actualizando registro');
+    }
+
+    return true;
+  } catch (error) {
+    console.error('❌ [updateSubmission] Error:', error);
+    return false;
+  }
+}
+
+// Función para eliminar una submission
+export async function deleteSubmission(form: string, id: string): Promise<boolean> {
+  try {
+    let endpoint = '';
+    
+    // Extraer el ID numérico del formato "prefix-id"
+    const numericId = id.includes('-') ? id.split('-')[1] : id;
+    
+    switch (form) {
+      case 'ordenes-mantenimiento':
+        endpoint = `/api/ordenes-mantenimiento?id=${numericId}`;
+        break;
+      case 'equipment-inspections':
+        endpoint = `/api/equipment-inspections?id=${numericId}`;
+        break;
+      case 'spares-requests':
+        endpoint = `/api/spares-requests?id=${numericId}`;
+        break;
+      default:
+        console.warn(`❌ [deleteSubmission] Formulario no soportado: ${form}`);
+        return false;
+    }
+
+    const response = await fetch(endpoint, { method: 'DELETE' });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Error eliminando registro');
+    }
+
+    return true;
+  } catch (error) {
+    console.error('❌ [deleteSubmission] Error:', error);
+    return false;
   }
 }
 

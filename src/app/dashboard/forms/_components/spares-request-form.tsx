@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { useToast } from "@/hooks/use-toast"
+import { useFormPersistence } from "@/hooks/use-form-persistence"
 import { Button } from "@/components/ui/button"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
@@ -13,6 +14,7 @@ import { useMemo, useState } from "react"
 import { useEquipos } from "@/hooks/use-equipos"
 
 const formSchema = z.object({
+  fecha: z.string().min(1, "La fecha es requerida."),
   repuesto: z.string().min(1, "El repuesto es requerido."),
   cantidad: z.number().min(1, "Mínimo 1 unidad."),
   maquina: z.string().min(1, "Indica la máquina que lo requiere."),
@@ -33,6 +35,7 @@ export function SparesRequestForm() {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      fecha: new Date().toISOString().split('T')[0],
       repuesto: "",
       cantidad: 1,
       maquina: "",
@@ -40,6 +43,14 @@ export function SparesRequestForm() {
       tecnico: "",
     },
   })
+
+  // Persistencia del formulario
+  const { clearPersistedData } = useFormPersistence<z.infer<typeof formSchema>>(
+    "spares-request-form",
+    form.control,
+    form.setValue,
+    form.watch
+  )
 
   const filteredEquipos = useMemo(() => {
     const q = maquinaQuery.trim().toLowerCase()
@@ -64,6 +75,7 @@ export function SparesRequestForm() {
       const payload = {
         ...values,
         maquina: codigoEquipo,
+        fechaSolicitud: values.fecha,
       }
 
       const response = await fetch('/api/spares-requests', {
@@ -83,6 +95,7 @@ export function SparesRequestForm() {
         })
         form.reset()
         setMaquinaQuery("") // Limpiar el campo de búsqueda de máquina
+        clearPersistedData() // Limpiar datos persistidos
       } else {
         throw new Error(result.error || result.details)
       }
@@ -101,6 +114,19 @@ export function SparesRequestForm() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+        <FormField
+          control={form.control}
+          name="fecha"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Fecha</FormLabel>
+              <FormControl>
+                <Input type="date" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
         <FormField
           control={form.control}
           name="repuesto"

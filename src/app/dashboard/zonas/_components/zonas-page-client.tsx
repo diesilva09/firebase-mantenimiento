@@ -8,6 +8,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { useStatePersistence } from "@/hooks/use-form-persistence";
 import {
   Dialog,
   DialogContent,
@@ -17,7 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MoreHorizontal, Loader2 } from "lucide-react";
+import { MoreHorizontal, Loader2, Eye, FolderOpen, Folder, ExternalLink, MapPin, Tag, FileText } from "lucide-react";
 import { useUser } from "@/firebase/auth/use-user";
 import {
   DropdownMenu,
@@ -75,11 +76,23 @@ export function ZonasPageClient() {
   const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-  const [codigo, setCodigo] = useState("");
-  const [nombre, setNombre] = useState("");
-  const [areaInput, setAreaInput] = useState("");
-  const [imagenesFolderUrl, setImagenesFolderUrl] = useState("");
-  const [attachmentsUrl, setAttachmentsUrl] = useState("");
+  // Estado persistente para el formulario de zonas
+  const [zonaForm, setZonaForm, clearZonaForm] = useStatePersistence("zona-form", {
+    codigo: "",
+    nombre: "",
+    areaInput: "",
+    imagenesFolderUrl: "",
+    attachmentsUrl: "",
+  });
+
+  const setCodigo = (value: string) => setZonaForm(prev => ({ ...prev, codigo: value }));
+  const setNombre = (value: string) => setZonaForm(prev => ({ ...prev, nombre: value }));
+  const setAreaInput = (value: string) => setZonaForm(prev => ({ ...prev, areaInput: value }));
+  const setImagenesFolderUrl = (value: string) => setZonaForm(prev => ({ ...prev, imagenesFolderUrl: value }));
+  const setAttachmentsUrl = (value: string) => setZonaForm(prev => ({ ...prev, attachmentsUrl: value }));
+
+  // Extraer valores individuales para compatibilidad
+  const { codigo, nombre, areaInput, imagenesFolderUrl, attachmentsUrl } = zonaForm;
   const [saving, setSaving] = useState(false);
   const [zonas, setZonas] = useState<Zona[]>([]);
   const [loadingZonas, setLoadingZonas] = useState(false);
@@ -97,6 +110,9 @@ export function ZonasPageClient() {
 
   const [codigoDuplicado, setCodigoDuplicado] = useState(false);
   const [loadingMantenimientosId, setLoadingMantenimientosId] = useState<string | null>(null);
+
+  // Estado para modal de detalles de zona
+  const [selectedZonaForDetails, setSelectedZonaForDetails] = useState<Zona | null>(null);
 
   // Estado para mantener el resaltado de la zona buscada
   const [highlightedZonaCodigo, setHighlightedZonaCodigo] = useState<string | null>(null);
@@ -393,6 +409,7 @@ export function ZonasPageClient() {
 
       setIsDialogOpen(false);
       setEditingZona(null);
+      clearZonaForm(); // Limpiar datos persistidos
 
       // opcional: sincronizar el filtro de área con lo que se guardó
       setArea(areaInput || null);
@@ -575,6 +592,10 @@ export function ZonasPageClient() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => setSelectedZonaForDetails(z)}>
+                                <Eye className="h-4 w-4 mr-2" />
+                                Ver detalles
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleEditZona(z)}>
                                 Editar
                               </DropdownMenuItem>
@@ -669,6 +690,10 @@ export function ZonasPageClient() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => setSelectedZonaForDetails(z)}>
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  Ver detalles
+                                </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => handleEditZona(z)}>
                                   Editar
                                 </DropdownMenuItem>
@@ -875,7 +900,158 @@ export function ZonasPageClient() {
           </DialogContent>
         </Dialog>
       )}
-      
+
+      {/* Modal de detalles de zona */}
+      <Dialog
+        open={!!selectedZonaForDetails}
+        onOpenChange={(open) => !open && setSelectedZonaForDetails(null)}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-blue-600" />
+              Detalles de la Zona
+            </DialogTitle>
+          </DialogHeader>
+          {selectedZonaForDetails && (
+            <div className="space-y-4 py-2">
+              {/* Información básica */}
+              <div className="space-y-2">
+                <div className="flex items-start gap-2">
+                  <Tag className="h-4 w-4 text-muted-foreground mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium">Código</p>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedZonaForDetails.codigo || "Sin código"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium">Nombre</p>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedZonaForDetails.nombre}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium">Área</p>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedZonaForDetails.area || "Sin área"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Tag className="h-4 w-4 text-muted-foreground mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium">Tipo</p>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedZonaForDetails.tipo === "PARTES_ALTAS"
+                        ? "Partes Altas"
+                        : selectedZonaForDetails.tipo === "LOCATIVO"
+                        ? "Mantenimiento Locativo"
+                        : selectedZonaForDetails.tipo}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Carpetas de Drive */}
+              <div className="border-t pt-4 space-y-3">
+                <h4 className="text-sm font-medium flex items-center gap-2">
+                  <FolderOpen className="h-4 w-4" />
+                  Carpetas de Drive
+                </h4>
+
+                {selectedZonaForDetails.imagenes_folder_url ? (
+                  <div className="flex items-start gap-2 p-3 bg-green-50 rounded-md">
+                    <FolderOpen className="h-4 w-4 text-green-600 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-green-800">
+                        Carpeta de imágenes
+                      </p>
+                      <a
+                        href={selectedZonaForDetails.imagenes_folder_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-green-700 hover:underline inline-flex items-center gap-1 mt-1"
+                      >
+                        Abrir carpeta
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 p-3 bg-yellow-50 rounded-md">
+                    <FolderOpen className="h-4 w-4 text-yellow-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-yellow-800">
+                        Sin carpeta de imágenes
+                      </p>
+                      <p className="text-sm text-yellow-700">
+                        Esta zona no tiene una carpeta de imágenes configurada.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {selectedZonaForDetails.attachments_url ? (
+                  <div className="flex items-start gap-2 p-3 bg-blue-50 rounded-md">
+                    <Folder className="h-4 w-4 text-blue-600 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-blue-800">
+                        Carpeta de anexos
+                      </p>
+                      <a
+                        href={selectedZonaForDetails.attachments_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-blue-700 hover:underline inline-flex items-center gap-1 mt-1"
+                      >
+                        Abrir carpeta
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 p-3 bg-yellow-50 rounded-md">
+                    <Folder className="h-4 w-4 text-yellow-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-yellow-800">
+                        Sin carpeta de anexos
+                      </p>
+                      <p className="text-sm text-yellow-700">
+                        Esta zona no tiene una carpeta de anexos configurada.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setSelectedZonaForDetails(null)}
+            >
+              Cerrar
+            </Button>
+            {selectedZonaForDetails?.codigo && (
+              <Button
+                onClick={() => {
+                  setSelectedZonaForDetails(null);
+                  handleOpenMantenimientos(selectedZonaForDetails);
+                }}
+              >
+                Ver Mantenimientos
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

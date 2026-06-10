@@ -41,6 +41,7 @@ import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import type { Task, User, Schedule, Priority } from "@/lib/types"
 import { useToast } from "@/hooks/use-toast"
+import { useFormPersistence } from "@/hooks/use-form-persistence"
 
 const taskSchema = z
   .object({
@@ -116,8 +117,17 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
       hasAlert: false,
       frecuencia: 'ninguna',
       intervalo: undefined,
+      anticipacionDias: 30,
     },
   })
+
+  // Persistencia del formulario
+  const { clearPersistedData } = useFormPersistence<TaskFormValues>(
+    "edit-task-form",
+    form.control,
+    form.setValue,
+    form.watch
+  )
 
   useEffect(() => {
     const fetchEquipos = async () => {
@@ -384,6 +394,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
         onEditTask(updatedTask)
 
         setIsOpen(false)
+        clearPersistedData() // Limpiar datos persistidos
       } catch (error) {
         console.error('Error actualizando tarea:', error)
       }

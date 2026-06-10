@@ -31,7 +31,7 @@ export interface EquipmentDetail {
   voltaje?: string | null
   rpm?: string | null
   magnitudMedida?: string | null
-  estado?: "Operativo" | "En mantenimiento" | "Fuera de servicio" | "En backup" | null
+  estado?: "Operativo" | "En mantenimiento" | "Fuera de servicio (chatarrizacion)" | "(backup) desuso" | null
   attachmentsUrl?: string | null
 }
 

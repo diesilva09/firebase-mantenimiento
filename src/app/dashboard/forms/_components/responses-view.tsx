@@ -18,17 +18,18 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { MoreHorizontal, Search, RefreshCw, FileSpreadsheet, FileText, File, Download } from "lucide-react"
+import { MoreHorizontal, Search, RefreshCw, FileSpreadsheet, FileText, File, Download, Pencil, Trash2, AlertCircle } from "lucide-react"
 import type { Submission, FormMetadata } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { getAllSubmissions, getFormsMetadata } from '@/lib/submissions-service'
+import { getAllSubmissions, getFormsMetadata, updateSubmission, deleteSubmission } from '@/lib/submissions-service'
 import { useEquipos } from '@/hooks/use-equipos'
 import { EquipmentDetailModal, type EquipmentDetail } from "@/components/equipment-detail-modal"
 import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
+import { useToast } from "@/hooks/use-toast"
 
 interface ResponsesViewProps {
   submissions?: Submission[]; // Hacer opcional para poder usar sin props
@@ -36,6 +37,7 @@ interface ResponsesViewProps {
 }
 
 export function ResponsesView({ submissions: initialSubmissions, forms: initialForms }: ResponsesViewProps) {
+  const { toast } = useToast()
   const [submissions, setSubmissions] = React.useState(initialSubmissions || [])
   const [forms, setForms] = React.useState(initialForms || [])
   const [filter, setFilter] = React.useState("")
@@ -46,6 +48,14 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
 
   const [selectedEquipmentForModal, setSelectedEquipmentForModal] = React.useState<EquipmentDetail | null>(null)
   const [isEquipmentModalOpen, setIsEquipmentModalOpen] = React.useState(false)
+
+  // Estados para editar y eliminar
+  const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false)
+  const [editingSubmission, setEditingSubmission] = React.useState<Submission | null>(null)
+  const [editFormData, setEditFormData] = React.useState<Record<string, any>>({})
+  const [isSaving, setIsSaving] = React.useState(false)
+  const [isDeleting, setIsDeleting] = React.useState(false)
 
   const { equipos } = useEquipos()
 
@@ -172,6 +182,116 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
     }
   };
 
+  // Funciones para editar
+  const handleEdit = (submission: Submission) => {
+    setEditingSubmission(submission)
+    setEditFormData({ ...submission.data })
+    setIsEditDialogOpen(true)
+    setIsDetailViewOpen(false)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingSubmission) return
+
+    setIsSaving(true)
+    try {
+      const success = await updateSubmission(editingSubmission.form, editingSubmission.id, editFormData)
+      if (success) {
+        // Actualizar la lista local
+        setSubmissions(prev => prev.map(s =>
+          s.id === editingSubmission.id
+            ? { ...s, data: editFormData }
+            : s
+        ))
+        setIsEditDialogOpen(false)
+        setEditingSubmission(null)
+        toast({
+          title: "✅ Registro actualizado",
+          description: "El registro se ha actualizado exitosamente.",
+        })
+      } else {
+        toast({
+          title: "❌ Error",
+          description: "No se pudo actualizar el registro.",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error('Error guardando cambios:', error)
+      toast({
+        title: "❌ Error",
+        description: "No se pudo guardar los cambios.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // Funciones para eliminar
+  const handleDelete = (submission: Submission) => {
+    setEditingSubmission(submission)
+    setIsDeleteDialogOpen(true)
+    setIsDetailViewOpen(false)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!editingSubmission) return
+
+    setIsDeleting(true)
+    try {
+      const success = await deleteSubmission(editingSubmission.form, editingSubmission.id)
+      if (success) {
+        // Remover de la lista local
+        setSubmissions(prev => prev.filter(s => s.id !== editingSubmission.id))
+        setIsDeleteDialogOpen(false)
+        setEditingSubmission(null)
+        toast({
+          title: "✅ Registro eliminado",
+          description: "El registro se ha eliminado exitosamente.",
+        })
+      } else {
+        toast({
+          title: "❌ Error",
+          description: "No se pudo eliminar el registro.",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error('Error eliminando:', error)
+      toast({
+        title: "❌ Error",
+        description: "No se pudo eliminar el registro.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  // Verificar si un formulario es editable (desactivado)
+  const isEditableForm = (form: string) => {
+    return false
+  }
+
+  // Verificar si un formulario es eliminable
+  const isDeletableForm = (form: string) => {
+    return ['ordenes-mantenimiento', 'equipment-inspections', 'spares-requests'].includes(form)
+  }
+
+  // Extraer la fecha del registro según el tipo de formulario
+  const getSubmissionDate = (submission: Submission): string => {
+    const data = submission.data;
+    // Buscar campos de fecha en orden de prioridad
+    const dateFields = ['Fecha Ejecución', 'Fecha Inspección', 'Fecha Solicitud', 'Fecha Parada', 'Fecha'];
+    for (const field of dateFields) {
+      if (data[field] && data[field] !== '-') {
+        return String(data[field]);
+      }
+    }
+    return '-';
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-64">
@@ -251,11 +371,14 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
                     <TableRow key={submission.id} onClick={() => handleViewDetails(submission)} className="cursor-pointer">
                       <TableCell className="font-medium">
                         <div>{submission.formTitle}</div>
-                        <div className="text-sm text-muted-foreground sm:hidden">{format(new Date(submission.submittedAt), "dd/MM/yyyy", { locale: es })}</div>
+                        <div className="text-sm text-muted-foreground sm:hidden">{getSubmissionDate(submission)}</div>
                       </TableCell>
-                      <TableCell className="hidden sm:table-cell">{format(new Date(submission.submittedAt), "dd/MM/yyyy HH:mm", { locale: es })}</TableCell>
+                      <TableCell className="hidden sm:table-cell">{getSubmissionDate(submission)}</TableCell>
                       <TableCell className="hidden md:table-cell text-muted-foreground text-sm truncate max-w-sm">
-                        {Object.entries(submission.data).slice(0, 2).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(', ')}...
+                        {Object.entries(submission.data)
+                          .filter(([_, value]) => value !== null && value !== undefined && String(value).trim() !== '' && String(value) !== 'null')
+                          .slice(0, 2)
+                          .map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(', ')}...
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <DropdownMenu>
@@ -268,6 +391,17 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
                           <DropdownMenuContent align="end">
                             <DropdownMenuLabel>Acciones</DropdownMenuLabel>
                             <DropdownMenuItem onSelect={() => handleViewDetails(submission)}>Ver Detalles</DropdownMenuItem>
+                            {isEditableForm(submission.form) && (
+                              <DropdownMenuItem onClick={() => handleEdit(submission)}>
+                                <Pencil className="mr-2 h-4 w-4 text-blue-600" /> Editar
+                              </DropdownMenuItem>
+                            )}
+                            {isEditableForm(submission.form) && (
+                              <DropdownMenuItem onClick={() => handleDelete(submission)} className="text-red-600">
+                                <Trash2 className="mr-2 h-4 w-4 text-red-600" /> Eliminar
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuLabel>Exportar</DropdownMenuLabel>
                             <DropdownMenuItem onClick={() => handleExport(submission, 'excel')}>
                               <FileSpreadsheet className="mr-2 h-4 w-4 text-green-600" /> Excel
                             </DropdownMenuItem>
@@ -299,7 +433,7 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
           <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>Detalle de Respuesta</DialogTitle>
-              <DialogDescription>{selectedSubmission.formTitle} - {format(new Date(selectedSubmission.submittedAt), "PPP p", { locale: es })}</DialogDescription>
+              <DialogDescription>{selectedSubmission.formTitle}</DialogDescription>
             </DialogHeader>
             <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto">
               {Object.entries(selectedSubmission.data)
@@ -357,8 +491,94 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
                 </div>
               ))}
             </div>
-            <DialogFooter>
+            <DialogFooter className="gap-2">
+              {selectedSubmission && isDeletableForm(selectedSubmission.form) && (
+                <Button variant="destructive" onClick={() => handleDelete(selectedSubmission)} className="gap-2">
+                  <Trash2 className="h-4 w-4" /> Eliminar
+                </Button>
+              )}
               <Button onClick={() => setIsDetailViewOpen(false)}>Cerrar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Diálogo de Editar */}
+      {editingSubmission && (
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Editar {editingSubmission.formTitle}</DialogTitle>
+              <DialogDescription>Modifica los campos necesarios y guarda los cambios.</DialogDescription>
+            </DialogHeader>
+            <div className="py-4 space-y-4">
+              {Object.entries(editFormData).map(([key, value]) => (
+                <div key={key} className="space-y-2">
+                  <label className="text-sm font-medium text-muted-foreground">{key}</label>
+                  {key.toLowerCase().includes('fecha') ? (
+                    <Input
+                      type="date"
+                      value={String(value || '').split('T')[0]}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, [key]: e.target.value }))}
+                    />
+                  ) : key.toLowerCase().includes('hora') ? (
+                    <Input
+                      type="time"
+                      value={String(value || '')}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, [key]: e.target.value }))}
+                    />
+                  ) : key.toLowerCase().includes('cantidad') ? (
+                    <Input
+                      type="number"
+                      value={String(value || '')}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, [key]: e.target.value }))}
+                    />
+                  ) : (
+                    <Input
+                      value={String(value || '')}
+                      onChange={(e) => setEditFormData(prev => ({ ...prev, [key]: e.target.value }))}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} disabled={isSaving}>
+                Cancelar
+              </Button>
+              <Button onClick={handleSaveEdit} disabled={isSaving}>
+                {isSaving ? 'Guardando...' : 'Guardar Cambios'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Diálogo de Eliminar */}
+      {editingSubmission && (
+        <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-600">
+                <AlertCircle className="h-5 w-5" />
+                Confirmar Eliminación
+              </DialogTitle>
+              <DialogDescription>
+                ¿Estás seguro de que deseas eliminar este registro de <strong>{editingSubmission.formTitle}</strong>?
+                <br /><br />
+                Esta acción no se puede deshacer.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="bg-muted p-3 rounded-md text-sm">
+              <p><strong>ID:</strong> {editingSubmission.id}</p>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeleting}>
+                Cancelar
+              </Button>
+              <Button variant="destructive" onClick={handleConfirmDelete} disabled={isDeleting}>
+                {isDeleting ? 'Eliminando...' : 'Sí, Eliminar'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

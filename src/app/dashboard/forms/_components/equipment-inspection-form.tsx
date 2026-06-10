@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { useToast } from "@/hooks/use-toast"
+import { useFormPersistence } from "@/hooks/use-form-persistence"
 import { Button } from "@/components/ui/button"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
@@ -14,6 +15,7 @@ import { TechnicianSelectField } from "./technician-select-field"
 import { useEffect, useMemo, useState } from "react"
 
 const formSchema = z.object({
+  fecha: z.string().min(1, "La fecha es requerida."),
   equipo: z.string().min(1, "El nombre del equipo es requerido."),
   responsable: z.string().min(1, "Debe registrar un responsable."),
   tipoInspeccion: z.enum(["Preventiva", "Correctiva", "Rutinaria"]),
@@ -34,6 +36,7 @@ export function EquipmentInspectionForm() {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      fecha: new Date().toISOString().split('T')[0],
       equipo: "",
       responsable: "",
       tipoInspeccion: "Rutinaria",
@@ -41,6 +44,14 @@ export function EquipmentInspectionForm() {
       observaciones: "",
     },
   })
+
+  // Persistencia del formulario
+  const { clearPersistedData } = useFormPersistence<z.infer<typeof formSchema>>(
+    "equipment-inspection-form",
+    form.control,
+    form.setValue,
+    form.watch
+  )
 
   useEffect(() => {
     const fetchEquipos = async () => {
@@ -108,6 +119,7 @@ export function EquipmentInspectionForm() {
       const payload = {
         ...values,
         equipo: codigoEquipo,
+        fechaInspeccion: values.fecha,
       }
 
       const response = await fetch('/api/equipment-inspections', {
@@ -123,9 +135,11 @@ export function EquipmentInspectionForm() {
       if (result.success) {
         toast({
           title: "✅ Inspección Guardada",
-          description: "La inspección de equipos ha sido registrada exitosamente.",
+          description: "La inspección del equipo ha sido registrada.",
         })
         form.reset()
+        setEquipoQuery("")
+        clearPersistedData() // Limpiar datos persistidos
       } else {
         throw new Error(result.error || result.details)
       }
@@ -144,6 +158,19 @@ export function EquipmentInspectionForm() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+        <FormField
+          control={form.control}
+          name="fecha"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Fecha</FormLabel>
+              <FormControl>
+                <Input type="date" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
         <FormField
           control={form.control}
           name="equipo"

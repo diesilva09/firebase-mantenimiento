@@ -32,6 +32,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { TechnicianSelectField } from "@/app/dashboard/forms/_components/technician-select-field"
 import type { Task, User } from "@/lib/types"
 import { useToast } from "@/hooks/use-toast"
+import { useFormPersistence } from "@/hooks/use-form-persistence"
 
 const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
@@ -136,6 +137,14 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
       anexoUrl: "",
     },
   })
+
+  // Persistencia del formulario
+  const { clearPersistedData } = useFormPersistence<CompleteFormValues>(
+    "complete-task-form",
+    form.control,
+    form.setValue,
+    form.watch
+  )
   
   const resetDialog = () => {
     form.reset({
@@ -151,6 +160,7 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
       anexoUrl: "",
     });
     setEquipoInfo(null);
+    clearPersistedData(); // Limpiar datos persistidos
   }
 
   async function onSubmit(data: CompleteFormValues) {

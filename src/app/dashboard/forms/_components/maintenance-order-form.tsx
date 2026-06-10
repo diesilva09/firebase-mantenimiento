@@ -5,17 +5,20 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { useToast } from "@/hooks/use-toast"
+import { useFormPersistence } from "@/hooks/use-form-persistence"
 import { Button } from "@/components/ui/button"
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TechnicianSelectField } from "./technician-select-field"
 import { AlertCircle, FolderOpen, ExternalLink, Image as ImageIcon, FileText, Folder, Link } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 const formSchema = z.object({
-  equipo: z.string().min(1, "El nombre del equipo es requerido."),
+  fecha: z.string().min(1, "La fecha es requerida."),
+  equipo: z.string().optional(),
   codigoEquipo: z.string().optional(),
   zona: z.string().optional(),
   tipoMantenimiento: z.enum(["Correctivo", "Preventivo", "Rutinario"]),
@@ -36,6 +39,7 @@ export function MaintenanceOrderForm() {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      fecha: new Date().toISOString().split('T')[0],
       equipo: "",
       codigoEquipo: "",
       zona: "",
@@ -53,9 +57,17 @@ export function MaintenanceOrderForm() {
     },
   })
 
+  // Persistencia del formulario
+  const { clearPersistedData } = useFormPersistence<z.infer<typeof formSchema>>(
+    "maintenance-order-form",
+    form.control,
+    form.setValue,
+    form.watch
+  )
+
   type EquipmentLookup = { codigo: string; nombre: string; area?: string | null; linea?: string | null }
 
-  type ZonaLookup = { id: string; codigo: string | null; nombre: string; area: string | null; tipo: string }
+  type ZonaLookup = { id: string; codigo: string | null; nombre: string; area: string | null; tipo: string; imagenes_folder_url?: string | null; attachments_url?: string | null }
 
   const [equipos, setEquipos] = useState<EquipmentLookup[]>([])
   const [equipoQuery, setEquipoQuery] = useState("")
@@ -73,8 +85,55 @@ export function MaintenanceOrderForm() {
   const [equipoInfo, setEquipoInfo] = useState<EquipoInfo | null>(null)
   const [loadingEquipo, setLoadingEquipo] = useState(false)
 
+  // Estado para información de carpetas de la zona seleccionada
+  const [zonaInfo, setZonaInfo] = useState<EquipoInfo | null>(null)
+  const [loadingZona, setLoadingZona] = useState(false)
+
+  // Estado para la pestaña activa (equipo o locativo)
+  const [activeTab, setActiveTab] = useState<"equipo" | "locativo">("equipo")
+
+  // Limpiar campos cuando cambia la pestaña
+  useEffect(() => {
+    if (activeTab === "equipo") {
+      form.setValue("zona", "")
+      setZonaQuery("")
+      setZonaInfo(null)
+    } else {
+      form.setValue("equipo", "")
+      form.setValue("codigoEquipo", "")
+      setEquipoQuery("")
+      setEquipoInfo(null)
+    }
+  }, [activeTab, form])
+
+  // Función para extraer folder ID de un URL de carpeta de Drive
+  const extractFolderId = (url: string | null | undefined): string | null => {
+    if (!url) return null;
+    // Patrón para URLs de carpetas de Drive: /folders/FOLDER_ID
+    const match = url.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    return match ? match[1] : null;
+  };
+
+  // Función para validar si un URL de archivo pertenece a una carpeta específica
+  const isUrlFromFolder = (fileUrl: string | null | undefined, folderUrl: string | null | undefined): boolean => {
+    if (!fileUrl || !folderUrl) return true; // Si no hay carpeta configurada, no validar
+    const folderId = extractFolderId(folderUrl);
+    if (!folderId) return true; // Si no se puede extraer el ID, no validar
+    // Verificar si el URL del archivo contiene referencias a la carpeta
+    // Los URLs de archivos de Drive típicamente no contienen el folderId,
+    // pero podemos verificar si el dominio es correcto
+    return fileUrl.includes('drive.google.com') || fileUrl.includes('docs.google.com');
+  };
+
   // Estado para prevenir doble envío del formulario
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Estados para validación de URLs de Drive
+  const [validationErrors, setValidationErrors] = useState<{
+    imageBefore?: string;
+    imageAfter?: string;
+    anexo?: string;
+  }>({});
 
   useEffect(() => {
     // 1. Estrategia Cache-First: Cargar inmediatamente del almacenamiento local si existe
@@ -170,6 +229,8 @@ export function MaintenanceOrderForm() {
           nombre: z.nombre ?? "",
           area: z.area ?? null,
           tipo: z.tipo ?? "",
+          imagenes_folder_url: z.imagenes_folder_url ?? null,
+          attachments_url: z.attachments_url ?? null,
         }));
         setZonas(mapped);
         
@@ -257,50 +318,78 @@ export function MaintenanceOrderForm() {
     }
   };
 
+  // Función para cargar información de carpetas de la zona
+  const loadZonaInfo = (zona: ZonaLookup) => {
+    setLoadingZona(true);
+    try {
+      setZonaInfo({
+        imagenesFolderUrl: zona.imagenes_folder_url,
+        attachmentsUrl: zona.attachments_url,
+      });
+    } catch (error) {
+      console.warn('Error cargando info de la zona:', error);
+      setZonaInfo(null);
+    } finally {
+      setLoadingZona(false);
+    }
+  };
+
   async function onSubmit(values: z.infer<typeof formSchema>) {
   // Prevenir doble envío
   if (isSubmitting) return;
   setIsSubmitting(true);
 
   try {
-    // Extraer código del equipo
+    // Validar según la pestaña activa
+    if (activeTab === "equipo" && !values.equipo?.trim()) {
+      throw new Error('Debe seleccionar un equipo.');
+    }
+    if (activeTab === "locativo" && !values.zona?.trim()) {
+      throw new Error('Debe seleccionar una zona.');
+    }
+
+    // Extraer código del equipo si se seleccionó un equipo
     let codigoEquipo = values.codigoEquipo;
-    
-    // Si no hay codigoEquipo guardado, intentar extraer del texto
-    if (!codigoEquipo && values.equipo) {
+
+    // Si está en la pestaña equipo y hay un equipo seleccionado, intentar extraer el código
+    if (activeTab === "equipo" && !codigoEquipo && values.equipo) {
       // Intentar formato "CODIGO - ..."
       const parts = values.equipo.split(' - ');
       codigoEquipo = parts[0];
-      
+
       // Si no coincide con ningún equipo conocido, buscar en la lista
-      const equipoEncontrado = equipos.find(e => 
-        e.codigo === codigoEquipo || 
+      const equipoEncontrado = equipos.find(e =>
+        e.codigo === codigoEquipo ||
         e.nombre.toLowerCase() === values.equipo.toLowerCase() ||
         values.equipo.toLowerCase().includes(e.codigo.toLowerCase()) ||
         values.equipo.toLowerCase().includes(e.nombre.toLowerCase())
       );
-      
+
       if (equipoEncontrado) {
         codigoEquipo = equipoEncontrado.codigo;
         console.log('Equipo encontrado por búsqueda:', equipoEncontrado.codigo, '-', equipoEncontrado.nombre);
       }
     }
-    
-    // Limpiar espacios y validar
+
+    // Limpiar espacios
     codigoEquipo = codigoEquipo?.trim() || '';
-    
-    if (!codigoEquipo) {
-      throw new Error('No se pudo determinar el código del equipo. Por favor selecciona un equipo de la lista.');
+
+    // Extraer código de zona si está en la pestaña locativo
+    let codigoZona = null;
+    if (activeTab === "locativo" && values.zona) {
+      // Intentar formato "CODIGO - ..."
+      const parts = values.zona.split(' - ');
+      codigoZona = parts[0]?.trim() || null;
     }
-    
-    console.log('Código de equipo final:', codigoEquipo, '| Input original:', values.equipo, '| CodigoEquipo guardado:', values.codigoEquipo);
-    
+
+    console.log('Pestaña activa:', activeTab, '| Código de equipo final:', codigoEquipo, '| Zona:', values.zona, '| Código zona:', codigoZona);
+
     // Preparar datos para la base de datos
     const ordenData = {
-      codigo_equipo: codigoEquipo,
-      zona: values.zona || null,
+      codigo_equipo: activeTab === "equipo" ? codigoEquipo || null : null,
+      zona: activeTab === "locativo" ? values.zona || null : null,
       tipo_mantenimiento: values.tipoMantenimiento,
-      fecha_solicitud: new Date().toISOString().split('T')[0],
+      fecha_solicitud: values.fecha,
       responsable: values.responsableMantenimiento,
       descripcion_falla: values.descripcionFalla,
       repuestos_utilizados: values.repuestos,
@@ -332,32 +421,63 @@ export function MaintenanceOrderForm() {
 
     const nuevaOrden = await response.json();
 
-    // También crear registro en la hoja de vida del equipo (equipos_historial)
-    try {
-      const historialPayload = {
-        codigoEquipo,
-        tareaId: null,
-        fechaEvento: new Date().toISOString(),
-        labor: values.descripcionFalla,
-        tipoMantenimiento: values.tipoMantenimiento,
-        repuestosUsados: values.repuestos,
-        observaciones: values.observaciones,
-        ejecutadoPor: values.responsableMantenimiento,
-        creadoPor: null,
-        imagenAntesUrl: values.imageBeforeUrl || null,
-        imagenDespuesUrl: values.imageAfterUrl || null,
-        anexoUrl: values.anexoUrl || null,
-      };
+    // Crear registro en la hoja de vida correspondiente
+    if (activeTab === "equipo" && codigoEquipo) {
+      // Guardar en equipos_historial
+      try {
+        const historialPayload = {
+          codigoEquipo,
+          tareaId: null,
+          fechaEvento: values.fecha ? new Date(values.fecha).toISOString() : new Date().toISOString(),
+          labor: values.descripcionFalla,
+          tipoMantenimiento: values.tipoMantenimiento,
+          repuestosUsados: values.repuestos,
+          observaciones: values.observaciones,
+          ejecutadoPor: values.responsableMantenimiento,
+          creadoPor: null,
+          imagenAntesUrl: values.imageBeforeUrl || null,
+          imagenDespuesUrl: values.imageAfterUrl || null,
+          anexoUrl: values.anexoUrl || null,
+        };
 
-      await fetch('/api/equipos/historial', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(historialPayload),
-      });
-    } catch (e) {
-      console.warn('No se pudo registrar la orden en equipos_historial', e);
+        await fetch('/api/equipos/historial', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(historialPayload),
+        });
+      } catch (e) {
+        console.warn('No se pudo registrar la orden en equipos_historial', e);
+      }
+    } else if (activeTab === "locativo" && codigoZona) {
+      // Guardar en zonas_historial
+      try {
+        const historialPayload = {
+          codigoZona,
+          tareaId: null,
+          fechaEvento: values.fecha ? new Date(values.fecha).toISOString() : new Date().toISOString(),
+          labor: values.descripcionFalla,
+          tipoMantenimiento: values.tipoMantenimiento,
+          repuestosUsados: values.repuestos,
+          observaciones: values.observaciones,
+          ejecutadoPor: values.responsableMantenimiento,
+          creadoPor: null,
+          imagenAntesUrl: values.imageBeforeUrl || null,
+          imagenDespuesUrl: values.imageAfterUrl || null,
+          anexoUrl: values.anexoUrl || null,
+        };
+
+        await fetch('/api/zonas/historial', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(historialPayload),
+        });
+      } catch (e) {
+        console.warn('No se pudo registrar la orden en zonas_historial', e);
+      }
     }
 
     // Opcional: mantener compatibilidad con localStorage temporalmente
@@ -381,10 +501,33 @@ export function MaintenanceOrderForm() {
       title: "✅ Orden Guardada en BD",
       description: `Orden guardada exitosamente`,
     });
-    
-    // Limpiar formulario
-    form.reset();
+
+    // Limpiar datos persistidos primero
+    clearPersistedData();
+
+    // Limpiar formulario y estados locales
+    form.reset({
+      fecha: new Date().toISOString().split('T')[0],
+      equipo: "",
+      codigoEquipo: "",
+      zona: "",
+      tipoMantenimiento: "Correctivo",
+      descripcionFalla: "",
+      repuestos: "",
+      prioridad: "Media",
+      responsableMantenimiento: "",
+      observaciones: "",
+      horaInicio: "",
+      horaFin: "",
+      imageBeforeUrl: "",
+      imageAfterUrl: "",
+      anexoUrl: "",
+    });
     setEquipoQuery("");
+    setZonaQuery("");
+    setEquipoInfo(null);
+    setZonaInfo(null);
+    setActiveTab("equipo");
 
   } catch (error) {
     console.error('Error guardando orden:', error);
@@ -405,124 +548,153 @@ export function MaintenanceOrderForm() {
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
         <FormField
           control={form.control}
-          name="equipo"
+          name="fecha"
           render={({ field }) => (
-            <FormItem className="relative">
-              <FormLabel>Equipo</FormLabel>
+            <FormItem>
+              <FormLabel>Fecha</FormLabel>
               <FormControl>
-                <Input
-                  placeholder="Escribe el código o nombre del equipo"
-                  value={equipoQuery}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    setEquipoQuery(v)
-                    field.onChange(v)
-                    setShowEquipoSuggestions(true)
-                  }}
-                  onFocus={() => {
-                    setShowEquipoSuggestions(true)
-                  }}
-                  onBlur={() => {
-                    setTimeout(() => setShowEquipoSuggestions(false), 150)
-                  }}
-                  autoComplete="off"
-                />
+                <Input type="date" {...field} />
               </FormControl>
-              {showEquipoSuggestions && equipoQuery.trim() !== '' && (
-                <div className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-popover text-xs shadow-md">
-                  {filteredEquipos.length === 0 ? (
-                    <div className="px-3 py-2 text-muted-foreground">
-                      No se encontraron equipos con "{equipoQuery}"
-                    </div>
-                  ) : (
-                    filteredEquipos.map((e) => (
-                      <button
-                        type="button"
-                        key={e.codigo}
-                        className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
-                        onMouseDown={(ev) => {
-                          ev.preventDefault()
-                          const areaText = e.area ?? "Sin área"
-                          const lineaText = e.linea ?? "Sin línea"
-                          const label = `${e.codigo} - ${areaText}${e.linea ? ` - ${lineaText}` : ""} - ${e.nombre}`
-                          setEquipoQuery(label)
-                          field.onChange(label)
-                          form.setValue("codigoEquipo", e.codigo)
-                          loadEquipoInfo(e.codigo)
-                          setShowEquipoSuggestions(false)
-                        }}
-                      >
-                        <span className="font-medium">{e.codigo}</span>
-                        <span className="text-[11px] text-muted-foreground">
-                          {e.area ?? "Sin área"}
-                          {e.linea ? ` • ${e.linea}` : ""}
-                          {` • ${e.nombre}`}
-                        </span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              )}
               <FormMessage />
             </FormItem>
           )}
         />
-        <FormField
-          control={form.control}
-          name="zona"
-          render={({ field }) => (
-            <FormItem className="relative">
-              <FormLabel>Zona</FormLabel>
-              <FormControl>
-                <Input
-                  placeholder="Escribe la zona o área (cuando sea labor de mantenimiento locativo o partes altas)"
-                  value={zonaQuery}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    setZonaQuery(v)
-                    field.onChange(v)
-                    setShowZonaSuggestions(true)
-                  }}
-                  onFocus={() => {
-                    setShowZonaSuggestions(true)
-                  }}
-                  onBlur={() => {
-                    setTimeout(() => setShowZonaSuggestions(false), 150)
-                  }}
-                />
-              </FormControl>
-              {showZonaSuggestions && filteredZonas.length > 0 && (
-                <div className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-popover text-xs shadow-md">
-                  {filteredZonas.map((z) => (
-                    <button
-                      type="button"
-                      key={z.id}
-                      className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
-                      onMouseDown={(ev) => {
-                        ev.preventDefault();
-                        const label = z.codigo || (z.area ? `${z.area} - ${z.nombre}` : z.nombre);
-                        setZonaQuery(label);
-                        field.onChange(label);
-                        setShowZonaSuggestions(false);
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "equipo" | "locativo")} className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="equipo">Equipo</TabsTrigger>
+            <TabsTrigger value="locativo">Locativo</TabsTrigger>
+          </TabsList>
+          <TabsContent value="equipo" className="space-y-4 mt-4">
+            <FormField
+              control={form.control}
+              name="equipo"
+              render={({ field }) => (
+                <FormItem className="relative">
+                  <FormLabel>Equipo</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="Escribe el código o nombre del equipo"
+                      value={equipoQuery}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setEquipoQuery(v)
+                        field.onChange(v)
+                        setShowEquipoSuggestions(true)
                       }}
-                    >
-                      <span className="font-medium">{z.codigo || (z.area ?? "Sin área")}</span>
-                      <span className="text-[11px] text-muted-foreground">{z.codigo ? `Código: ${z.codigo} • ` : ""}Zona • {z.nombre}</span>
-                    </button>
-                  ))}
-                </div>
+                      onFocus={() => {
+                        setShowEquipoSuggestions(true)
+                      }}
+                      onBlur={() => {
+                        setTimeout(() => setShowEquipoSuggestions(false), 150)
+                      }}
+                      autoComplete="off"
+                    />
+                  </FormControl>
+                  {showEquipoSuggestions && equipoQuery.trim() !== '' && (
+                    <div className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-popover text-xs shadow-md">
+                      {filteredEquipos.length === 0 ? (
+                        <div className="px-3 py-2 text-muted-foreground">
+                          No se encontraron equipos con "{equipoQuery}"
+                        </div>
+                      ) : (
+                        filteredEquipos.map((e) => (
+                          <button
+                            type="button"
+                            key={e.codigo}
+                            className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
+                            onMouseDown={(ev) => {
+                              ev.preventDefault()
+                              const areaText = e.area ?? "Sin área"
+                              const lineaText = e.linea ?? "Sin línea"
+                              const label = `${e.codigo} - ${areaText}${e.linea ? ` - ${lineaText}` : ""} - ${e.nombre}`
+                              setEquipoQuery(label)
+                              field.onChange(label)
+                              form.setValue("codigoEquipo", e.codigo)
+                              loadEquipoInfo(e.codigo)
+                              setShowEquipoSuggestions(false)
+                            }}
+                          >
+                            <span className="font-medium">{e.codigo}</span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {e.area ?? "Sin área"}
+                              {e.linea ? ` • ${e.linea}` : ""}
+                              {` • ${e.nombre}`}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                  <FormMessage />
+                </FormItem>
               )}
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+            />
+          </TabsContent>
+          <TabsContent value="locativo" className="space-y-4 mt-4">
+            <FormField
+              control={form.control}
+              name="zona"
+              render={({ field }) => (
+                <FormItem className="relative">
+                  <FormLabel>Zona</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="Escribe la zona o área (cuando sea labor de mantenimiento locativo o partes altas)"
+                      value={zonaQuery}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setZonaQuery(v)
+                        field.onChange(v)
+                        setShowZonaSuggestions(true)
+                        // Limpiar zonaInfo cuando se escribe manualmente
+                        setZonaInfo(null)
+                      }}
+                      onBlur={() => {
+                        setTimeout(() => {
+                          setShowZonaSuggestions(false)
+                        }, 200)
+                      }}
+                    />
+                  </FormControl>
+                  {showZonaSuggestions && filteredZonas.length > 0 && (
+                    <div className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-popover text-xs shadow-md">
+                      {filteredZonas.map((z) => (
+                        <button
+                          type="button"
+                          key={z.id}
+                          className="flex w-full flex-col items-start px-2 py-1.5 text-left hover:bg-accent"
+                          onMouseDown={(ev) => {
+                            ev.preventDefault();
+                            // Formato completo: Código - Área - Nombre
+                            const label = z.codigo
+                              ? `${z.codigo} - ${z.area || 'Sin área'} - ${z.nombre}`
+                              : (z.area ? `${z.area} - ${z.nombre}` : z.nombre);
+                            setZonaQuery(label);
+                            field.onChange(label);
+                            loadZonaInfo(z);
+                            setShowZonaSuggestions(false);
+                          }}
+                        >
+                          <span className="font-medium">{z.codigo || (z.area ?? "Sin área")}</span>
+                          <span className="text-[11px] text-muted-foreground">{z.codigo ? `Código: ${z.codigo} • ` : ""}Zona • {z.nombre}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </TabsContent>
+        </Tabs>
+
         <FormField
           control={form.control}
           name="tipoMantenimiento"
           render={({ field }) => (
             <FormItem>
               <FormLabel>Tipo de Mantenimiento</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
+              <Select onValueChange={field.onChange} value={field.value}>
                 <FormControl>
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccione un tipo" />
@@ -571,7 +743,7 @@ export function MaintenanceOrderForm() {
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Prioridad</FormLabel>
-                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                <Select onValueChange={field.onChange} value={field.value}>
                   <FormControl>
                     <SelectTrigger>
                       <SelectValue placeholder="Seleccione la prioridad" />
@@ -650,16 +822,31 @@ export function MaintenanceOrderForm() {
             Imágenes de Evidencia (Antes/Después)
           </h3>
 
-          {/* Estado de la carpeta de imágenes del equipo */}
-          {loadingEquipo ? (
+          {/* Estado de la carpeta de imágenes - Zona o Equipo */}
+          {loadingEquipo || loadingZona ? (
             <Alert className="bg-gray-50 border-gray-200">
-              <AlertDescription className="text-sm">Cargando información del equipo...</AlertDescription>
+              <AlertDescription className="text-sm">Cargando información de carpetas...</AlertDescription>
+            </Alert>
+          ) : zonaInfo?.imagenesFolderUrl ? (
+            <Alert className="bg-green-50 border-green-200">
+              <FolderOpen className="h-4 w-4 text-green-600" />
+              <AlertDescription className="text-sm text-green-800">
+                <strong>Carpeta de imágenes de la zona configurada:</strong>
+                <a
+                  href={zonaInfo.imagenesFolderUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 ml-2 text-green-700 hover:underline"
+                >
+                  Abrir carpeta <ExternalLink className="h-3 w-3" />
+                </a>
+              </AlertDescription>
             </Alert>
           ) : equipoInfo?.imagenesFolderUrl ? (
             <Alert className="bg-green-50 border-green-200">
               <FolderOpen className="h-4 w-4 text-green-600" />
               <AlertDescription className="text-sm text-green-800">
-                <strong>Carpeta de imágenes configurada:</strong>
+                <strong>Carpeta de imágenes del equipo configurada:</strong>
                 <a
                   href={equipoInfo.imagenesFolderUrl}
                   target="_blank"
@@ -694,11 +881,24 @@ export function MaintenanceOrderForm() {
                     <Input
                       placeholder="https://drive.google.com/file/d/..."
                       {...field}
+                      className={validationErrors.imageBefore ? "border-orange-400 focus-visible:ring-orange-400" : ""}
+                      onChange={(e) => {
+                        field.onChange(e);
+                        const value = e.target.value;
+                        if (value && !isUrlFromFolder(value, zonaInfo?.imagenesFolderUrl || equipoInfo?.imagenesFolderUrl)) {
+                          setValidationErrors(prev => ({ ...prev, imageBefore: "⚠️ Este link no parece ser de la carpeta configurada" }));
+                        } else {
+                          setValidationErrors(prev => ({ ...prev, imageBefore: undefined }));
+                        }
+                      }}
                     />
                   </FormControl>
                   <FormDescription className="text-xs">
                     Pega el link de la imagen ya subida a Drive
                   </FormDescription>
+                  {validationErrors.imageBefore && (
+                    <p className="text-xs text-orange-600 mt-1">{validationErrors.imageBefore}</p>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}
@@ -718,11 +918,24 @@ export function MaintenanceOrderForm() {
                     <Input
                       placeholder="https://drive.google.com/file/d/..."
                       {...field}
+                      className={validationErrors.imageAfter ? "border-orange-400 focus-visible:ring-orange-400" : ""}
+                      onChange={(e) => {
+                        field.onChange(e);
+                        const value = e.target.value;
+                        if (value && !isUrlFromFolder(value, zonaInfo?.imagenesFolderUrl || equipoInfo?.imagenesFolderUrl)) {
+                          setValidationErrors(prev => ({ ...prev, imageAfter: "⚠️ Este link no parece ser de la carpeta configurada" }));
+                        } else {
+                          setValidationErrors(prev => ({ ...prev, imageAfter: undefined }));
+                        }
+                      }}
                     />
                   </FormControl>
                   <FormDescription className="text-xs">
                     Pega el link de la imagen ya subida a Drive
                   </FormDescription>
+                  {validationErrors.imageAfter && (
+                    <p className="text-xs text-orange-600 mt-1">{validationErrors.imageAfter}</p>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}
@@ -737,16 +950,31 @@ export function MaintenanceOrderForm() {
             Adjuntar Archivo (Anexo)
           </h3>
 
-          {/* Estado de la carpeta de anexos del equipo */}
-          {loadingEquipo ? (
+          {/* Estado de la carpeta de anexos - Zona o Equipo */}
+          {loadingEquipo || loadingZona ? (
             <Alert className="bg-gray-50 border-gray-200">
-              <AlertDescription className="text-sm">Cargando información del equipo...</AlertDescription>
+              <AlertDescription className="text-sm">Cargando información de carpetas...</AlertDescription>
+            </Alert>
+          ) : zonaInfo?.attachmentsUrl ? (
+            <Alert className="bg-blue-50 border-blue-200">
+              <Folder className="h-4 w-4 text-blue-600" />
+              <AlertDescription className="text-sm text-blue-800">
+                <strong>Carpeta de anexos de la zona configurada:</strong>
+                <a
+                  href={zonaInfo.attachmentsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 ml-2 text-blue-700 hover:underline"
+                >
+                  Abrir carpeta <ExternalLink className="h-3 w-3" />
+                </a>
+              </AlertDescription>
             </Alert>
           ) : equipoInfo?.attachmentsUrl ? (
             <Alert className="bg-blue-50 border-blue-200">
               <Folder className="h-4 w-4 text-blue-600" />
               <AlertDescription className="text-sm text-blue-800">
-                <strong>Carpeta de anexos configurada:</strong>
+                <strong>Carpeta de anexos del equipo configurada:</strong>
                 <a
                   href={equipoInfo.attachmentsUrl}
                   target="_blank"
@@ -779,11 +1007,24 @@ export function MaintenanceOrderForm() {
                   <Input
                     placeholder="https://drive.google.com/file/d/..."
                     {...field}
+                    className={validationErrors.anexo ? "border-orange-400 focus-visible:ring-orange-400" : ""}
+                    onChange={(e) => {
+                      field.onChange(e);
+                      const value = e.target.value;
+                      if (value && !isUrlFromFolder(value, zonaInfo?.attachmentsUrl || equipoInfo?.attachmentsUrl)) {
+                        setValidationErrors(prev => ({ ...prev, anexo: "⚠️ Este link no parece ser de la carpeta configurada" }));
+                      } else {
+                        setValidationErrors(prev => ({ ...prev, anexo: undefined }));
+                      }
+                    }}
                   />
                 </FormControl>
                 <FormDescription className="text-xs">
                   Pega el link del archivo (PDF, Word, Excel, etc.) ya subido a Drive
                 </FormDescription>
+                {validationErrors.anexo && (
+                  <p className="text-xs text-orange-600 mt-1">{validationErrors.anexo}</p>
+                )}
                 <FormMessage />
               </FormItem>
             )}

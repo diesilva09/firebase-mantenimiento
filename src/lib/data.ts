@@ -7,6 +7,8 @@ export const users: User[] = [
   { id: 'tech-3', name: 'Juan David Caro', avatarUrl: 'https://picsum.photos/seed/tech3/40/40' },
   { id: 'tech-4', name: 'Sergio Rubiano', avatarUrl: 'https://picsum.photos/seed/tech4/40/40' },
   { id: 'tech-5', name: 'Javier Morales', avatarUrl: 'https://picsum.photos/seed/tech5/40/40' },
+  { id: 'tech-6', name: 'Andres', avatarUrl: 'https://picsum.photos/seed/tech6/40/40' },
+  { id: 'tech-7', name: 'Robayo', avatarUrl: 'https://picsum.photos/seed/tech7/40/40' },
 ];
 
 const today = new Date();

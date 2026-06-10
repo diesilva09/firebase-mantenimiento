@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { FormControl, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -14,27 +14,83 @@ interface TechnicianSelectFieldProps {
   inputPlaceholder?: string;
 }
 
+const PERSONAL_EXTERNO_VALUE = "__personal_externo__";
+const OTRO_TECNICO_VALUE = "__otro_tecnico__";
+
 export function TechnicianSelectField({
   field,
   label,
-  placeholder = "Seleccione otro técnico",
-  inputPlaceholder = "Escriba el nombre del técnico",
+  placeholder = "Seleccione quien ejecutó",
+  inputPlaceholder = "Escriba el nombre",
 }: TechnicianSelectFieldProps) {
-  const [showInput, setShowInput] = useState(field.value && !users.some(user => user.name === field.value));
+  // Verificar el tipo de valor actual
+  const isPersonalExterno = field.value?.startsWith("Personal externo - ");
+  const isOtroTecnico = field.value && !users.some(user => user.name === field.value) && !isPersonalExterno;
+
+  const [externalName, setExternalName] = useState(() => {
+    if (isPersonalExterno) return field.value.replace("Personal externo - ", "");
+    if (isOtroTecnico) return field.value;
+    return "";
+  });
+
+  const [inputMode, setInputMode] = useState<"personal_externo" | "otro" | null>(
+    isPersonalExterno ? "personal_externo" : isOtroTecnico ? "otro" : null
+  );
+
+  // Sincronizar estado interno cuando el valor del campo cambia externamente (ej. form.reset)
+  useEffect(() => {
+    const newIsPersonalExterno = field.value?.startsWith("Personal externo - ");
+    const newIsOtroTecnico = field.value && !users.some(user => user.name === field.value) && !newIsPersonalExterno;
+
+    if (newIsPersonalExterno) {
+      setInputMode("personal_externo");
+      setExternalName(field.value.replace("Personal externo - ", ""));
+    } else if (newIsOtroTecnico) {
+      setInputMode("otro");
+      setExternalName(field.value);
+    } else {
+      setInputMode(null);
+      setExternalName("");
+    }
+  }, [field.value]);
 
   const handleSelectChange = (value: string) => {
-    if (value === "otro") {
-      setShowInput(true);
-      field.onChange("");
+    if (value === PERSONAL_EXTERNO_VALUE) {
+      setInputMode("personal_externo");
+      field.onChange(externalName ? `Personal externo - ${externalName}` : "");
+    } else if (value === OTRO_TECNICO_VALUE) {
+      setInputMode("otro");
+      field.onChange(externalName || "");
     } else {
-      setShowInput(false);
+      setInputMode(null);
+      setExternalName("");
       field.onChange(value);
+    }
+  };
+
+  const handleExternalNameChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const name = event.target.value;
+    setExternalName(name);
+    if (inputMode === "personal_externo") {
+      field.onChange(name ? `Personal externo - ${name}` : "");
+    } else {
+      field.onChange(name);
     }
   };
 
   const getSelectValue = () => {
     if (!field.value) return "";
-    return users.some((user) => user.name === field.value) ? field.value : "otro";
+    // Si es personal externo, retornar el valor especial
+    if (field.value?.startsWith("Personal externo - ")) return PERSONAL_EXTERNO_VALUE;
+    // Si es otro técnico (no está en la lista y no es personal externo)
+    if (!users.some((user) => user.name === field.value)) return OTRO_TECNICO_VALUE;
+    // Si es un usuario de la lista, retornar el nombre
+    return field.value;
+  };
+
+  const getInputPlaceholder = () => {
+    if (inputMode === "personal_externo") return "Escriba el nombre del personal externo";
+    return "Escriba el nombre del técnico";
   };
 
   return (
@@ -52,16 +108,17 @@ export function TechnicianSelectField({
               {user.name}
             </SelectItem>
           ))}
-          <SelectItem value="otro">Otro técnico</SelectItem>  
+          <SelectItem value={OTRO_TECNICO_VALUE}>Otro técnico</SelectItem>
+          <SelectItem value={PERSONAL_EXTERNO_VALUE}>Personal externo</SelectItem>  
         </SelectContent>
       </Select>
       
-      {showInput && (
+      {inputMode && (
         <FormControl className="mt-2">
           <Input
-            placeholder={inputPlaceholder}
-            value={field.value ?? ""}
-            onChange={(event) => field.onChange(event.target.value)}
+            placeholder={getInputPlaceholder()}
+            value={externalName}
+            onChange={handleExternalNameChange}
             onBlur={field.onBlur}
           />
         </FormControl>

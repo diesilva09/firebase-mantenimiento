@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
+import { useFormPersistence } from "@/hooks/use-form-persistence"
 import { useUser } from '@/firebase/auth/use-user'
 import { useEquipos } from '@/hooks/use-equipos' 
 import { useDashboardSearch, SearchSuggestion } from '@/context/dashboard-search-context'
@@ -63,7 +64,7 @@ const equipmentSchema = z.object({
   voltaje: z.string().regex(/^[\d.]+\s*.*$|^\s*$|^$/, "Formato inválido para voltaje").optional(),
   rpm: z.string().regex(/^\d+.*$|^\s*$|^$/, "Formato inválido para RPM").optional(),
   magnitudMedida: z.string().max(50, "La magnitud medida es muy larga").optional(),
-  estado: z.enum(["Operativo", "En mantenimiento", "Fuera de servicio", "En backup"]).optional(),
+  estado: z.enum(["Operativo", "En mantenimiento", "Fuera de servicio (chatarrizacion)", "(backup) desuso"]).optional(),
   attachmentsUrl: z.string().optional().nullable(),
   imagenesFolderUrl: z.string().optional().nullable(),
 })
@@ -232,6 +233,14 @@ export default function EquiposPage() {
     },
   })
 
+  // Persistencia del formulario
+  const { clearPersistedData } = useFormPersistence<EquipmentForm>(
+    "equipment-form",
+    form.control,
+    form.setValue,
+    form.watch
+  )
+
   
   const { toast } = useToast()
 
@@ -258,7 +267,7 @@ export default function EquiposPage() {
   
 
   // Filtros adicionales
-  const [estadoFilter, setEstadoFilter] = useState<string>("all") // "all", "Operativo", "En mantenimiento", "Fuera de servicio"
+  const [estadoFilter, setEstadoFilter] = useState<string>("all") // "all", "Operativo", "En mantenimiento", "chatarrizacion"
   const [editingId, setEditingId] = useState<string | null>(null)
 
   // Estado para rastrear si hay un código duplicado
@@ -644,6 +653,7 @@ export default function EquiposPage() {
           setEditingId(null)
           form.reset()
           setView('list')
+          clearPersistedData() // Limpiar datos persistidos
           // Limpiar cualquier resaltado previo (p. ej. venimos de una búsqueda)
           if (highlightedCodigo) setHighlightedCodigo(null)
 
@@ -669,6 +679,7 @@ export default function EquiposPage() {
         if (success) {
           form.reset()
           setView('list')
+          clearPersistedData() // Limpiar datos persistidos
           // Limpiar resaltado previo al crear nuevo equipo
           if (highlightedCodigo) setHighlightedCodigo(null)
 
@@ -811,8 +822,8 @@ export default function EquiposPage() {
                   <option value="all">Todos los estados</option>
                   <option value="Operativo">Operativo</option>
                   <option value="En mantenimiento">En mantenimiento</option>
-                  <option value="Fuera de servicio">Fuera de servicio</option>
-                  <option value="En backup">En backup</option>
+                  <option value="Fuera de servicio (chatarrizacion)">Fuera de servicio (chatarrizacion)</option>
+                  <option value="(backup) desuso">(backup) desuso</option>
                 </select>
               </div>
             </div>
@@ -1025,8 +1036,8 @@ export default function EquiposPage() {
                         >
                           <option value="Operativo">Operativo</option>
                           <option value="En mantenimiento">En mantenimiento</option>
-                          <option value="Fuera de servicio">Fuera de servicio</option>
-                          <option value="En backup">En backup</option>
+                          <option value="Fuera de servicio (chatarrizacion)">Fuera de servicio (chatarrizacion)</option>
+                          <option value="(backup) desuso">(backup) desuso</option>
                         </select>
                       </FormControl>
                       <FormMessage />
@@ -1309,8 +1320,8 @@ export default function EquiposPage() {
                                           "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium mt-6 "
                                         if (estado === "Operativo") classes += "bg-green-100 text-green-800"
                                         else if (estado === "En mantenimiento") classes += "bg-yellow-100 text-yellow-800"
-                                        else if (estado === "En backup") classes += "bg-blue-100 text-blue-800"
-                                        else classes += "bg-red-100 text-red-800"
+                                        else if (estado === "(backup) desuso") classes += "bg-blue-100 text-blue-800"
+                                        else if (estado === "Fuera de servicio (chatarrizacion)") classes += "bg-red-100 text-red-800"
                                       
                                         return <span className={classes}>{estado}</span>
                                        

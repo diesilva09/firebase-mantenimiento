@@ -45,6 +45,7 @@ import type { Task, User, Schedule, Priority, Notification } from "@/lib/types"
 import { useNotificationsContext as useNotifications } from "@/context/notifications-context"
 import { scheduleTaskReminders } from "../../../../services/task-reminders"
 import { useToast } from "@/hooks/use-toast"
+import { useFormPersistence } from "@/hooks/use-form-persistence"
 
 const taskSchema = z
   .object({
@@ -134,6 +135,14 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
       anticipacionDias: 30,
     },
   })
+
+  // Persistencia del formulario
+  const { clearPersistedData } = useFormPersistence<TaskFormValues>(
+    "add-task-form",
+    form.control,
+    form.setValue,
+    form.watch
+  )
 
   const [equipos, setEquipos] = useState<EquipmentLookup[]>([])
   const [zonas, setZonas] = useState<ZonaLookup[]>([])
@@ -488,6 +497,7 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
       form.reset()
       setCodeQuery("")
       setAreaQuery("")
+      clearPersistedData() // Limpiar datos persistidos
     } catch (error) {
       console.error('Error guardando tarea:', error);
       toast({
