@@ -29,7 +29,6 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { TechnicianSelectField } from "@/app/dashboard/forms/_components/technician-select-field"
 import type { Task, User } from "@/lib/types"
 import { useToast } from "@/hooks/use-toast"
 import { useFormPersistence } from "@/hooks/use-form-persistence"
@@ -87,6 +86,7 @@ interface CompleteTaskDialogProps {
 interface EquipoInfo {
   imagenesFolderUrl?: string | null
   attachmentsUrl?: string | null
+  codigo?: string
 }
 
 export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete }: CompleteTaskDialogProps) {
@@ -100,15 +100,16 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
       const loadEquipoInfo = async () => {
         setLoadingEquipo(true);
         try {
-          const res = await fetch('/api/equipos');
+          // Sugerencia: En el futuro usar /api/equipos?codigo=${task.code}
+          const res = await fetch('/api/equipos'); 
           if (res.ok) {
             const json = await res.json();
-            const equipos = json.data || [];
-            const equipo = equipos.find((e: any) => e.codigo === task.code);
+            const equipos: EquipoInfo[] = json.data || [];
+            const equipo = equipos.find((e) => e.codigo === task.code);
             if (equipo) {
               setEquipoInfo({
-                imagenesFolderUrl: equipo.imagenes_folder_url,
-                attachmentsUrl: equipo.attachments_url,
+                imagenesFolderUrl: equipo.imagenesFolderUrl,
+                attachmentsUrl: equipo.attachmentsUrl,
               });
             }
           }
@@ -178,29 +179,12 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
       };
     } else {
       const selectedUser = users.find(u => u.id === data.executedById);
-
       if (selectedUser) {
-        executedByUser = {
-          id: selectedUser.id,
-          name: selectedUser.name,
-          avatarUrl: selectedUser.avatarUrl || `https://picsum.photos/seed/${encodeURIComponent(selectedUser.name)}/40/40`,
-        };
+        executedByUser = selectedUser;
       } else {
-        const techNameMap: Record<string, string> = {
-          "luis bohorquez": "Luis Bohorquez",
-          "duvan guevara": "Duvan Guevara",
-          "juan david caro": "Juan David Caro",
-          "sergio rubiano": "Sergio Rubiano",
-          "javier morales": "Javier Morales",
-        };
-
-        const mappedName = techNameMap[data.executedById];
-        const name = mappedName || data.executedById;
-
         executedByUser = {
-          id: data.executedById,
-          name,
-          avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`,
+          id: "unknown",
+          name: "Desconocido",
         };
       }
     }
@@ -289,13 +273,9 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="luis bohorquez">Luis Bohorquez</SelectItem>
-                        <SelectItem value="duvan guevara">Duvan Guevara</SelectItem>
-                        <SelectItem value="juan david caro">Juan David Caro</SelectItem>
-                        <SelectItem value="sergio rubiano">Sergio Rubiano</SelectItem>
-                        <SelectItem value="javier morales">Javier Morales</SelectItem>
-                        <SelectItem value="Andres">Andres</SelectItem>
-                        <SelectItem value="Robayo">Robayo</SelectItem>
+                        {users.map((user) => (
+                          <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
+                        ))}
                         <SelectItem value="otro">Otro técnico</SelectItem>
                         <SelectItem value="personal-externo">Personal Externo</SelectItem>
                        </SelectContent>

@@ -6,14 +6,8 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { signInWithEmail } from '@/firebase/auth/auth-service'
+import { signInWithEmail, logOut } from '@/firebase/auth/auth-service'
 import { Eye, EyeOff } from "lucide-react";
-
-
-
-// validacion de emails demo 
-const DEMO_ADMIN_EMAIL = 'admin@demo.local'
-const DEMO_USER_EMAIL = 'user@demo.local'
 
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +33,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [isProcessingLogin, setIsProcessingLogin] = useState(false);
   const { user, loading: userLoading } = useUser();
   const { toast } = useToast();
   
@@ -46,10 +41,10 @@ export default function LoginPage() {
   const hasSession = !!user;
 
   useEffect(() => {
-    if (!userLoading && hasSession) {
+    if (!userLoading && hasSession && !isProcessingLogin) {
       router.replace("/dashboard/tasks");
     }
-  }, [userLoading, hasSession, router]);
+  }, [userLoading, hasSession, router, isProcessingLogin]);
 
   const form = useForm<EmailFormValues>({
     resolver: zodResolver(emailSchema),
@@ -61,71 +56,76 @@ export default function LoginPage() {
 
   const handleEmailSignIn = async (data: EmailFormValues) => {
   setLoading(true);
-  try {
-    // Siempre autenticar con Firebase
-    await signInWithEmail(data.email, data.password);
+  setIsProcessingLogin(true);
+  let firebaseAuthenticated = false;
 
-    // Determinar si es admin según la variable de entorno
-    try {
-      const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
-      const isAdmin = adminEnv.includes(data.email);
-      localStorage.setItem('isAdmin', isAdmin ? 'true' : 'false');
-      localStorage.setItem('userEmail', data.email);
-    } catch (e) {
-      localStorage.setItem('isAdmin', 'false');
-      localStorage.setItem('userEmail', data.email);
+  try {
+    // 1. Autenticar con Firebase
+    const userCredential = await signInWithEmail(data.email, data.password);
+    firebaseAuthenticated = true;
+
+    // Intentamos obtener el usuario del objeto retornado (algunos wrappers devuelven el User directamente)
+    const firebaseUser = userCredential?.user || userCredential;
+    const uid = firebaseUser?.uid;
+    const userEmail = firebaseUser?.email || data.email;
+
+    if (!uid) {
+      throw new Error("No se pudo obtener el identificador único del usuario (UID).");
     }
 
+    // 2. Validar contra nuestra base de datos SQL
+    const roleRes = await fetch('/api/auth/role', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: userEmail, uid: uid }),
+    });
+    
+    const roleData = await roleRes.json();
+
+    if (!roleRes.ok || roleData.role === 'NONE') {
+      // Si no tiene rol asignado o la cuenta no es válida, cerramos sesión inmediatamente
+      await logOut();
+      setIsProcessingLogin(false); // Liberamos aquí para permitir reintento
+      toast({
+        title: "Acceso restringido",
+        description: "No tienes permisos para acceder a este sistema o tu cuenta está inactiva.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Si todo está bien, redirigimos nosotros mismos
     router.push('/dashboard/tasks');
   } catch (err: any) {
-  console.error("Login error", err);
-
- //mostrar mensaje de error 
-
-  let msg = "No se pudo iniciar sesión. Verifica tu correo y contraseña.";
-  if (err?.code === "auth/invalid-credential") {
-    msg = "Correo o contraseña incorrectos.";
-  }
-
-  //mouestra error al iniciar seccion si las credenciales son incorrectas 
-
-  toast({
-    title: "Error de inicio de sesión",
-    description: msg,
-    variant: "destructive",
-  });
-} finally {
-  setLoading(false);
-}
-};
-
-
-//funcion para validar 
-
-  const fillAdmin = () => {
-    form.setValue('email', process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',')[0]?.trim() || DEMO_ADMIN_EMAIL)
-    form.setValue('password', 'any-password')
-  }
-
-  const fillUser = () => {
-    form.setValue('email', process.env.NEXT_PUBLIC_DEMO_USER_EMAIL || DEMO_USER_EMAIL)
-    form.setValue('password', 'any-password')
-  }
-
-  const doDemoLogin = (email: string) => {
-    setLoading(true)
-    try {
-      const isAdmin = email === DEMO_ADMIN_EMAIL
-      localStorage.setItem('isAdmin', isAdmin ? 'true' : 'false')
-      localStorage.setItem('userEmail', email)
-      router.push('/dashboard/tasks')
-    } finally {
-      setLoading(false)
+    console.error("Login error", err);
+    
+    // Si logramos autenticar en Firebase pero algo falló después (SQL o datos),
+    // cerramos la sesión e introducimos una pequeña espera para que el estado
+    // global de Firebase se actualice antes de liberar `isProcessingLogin`.
+    if (firebaseAuthenticated) {
+      await logOut();
+      // Pequeño delay para asegurar que useUser() detecte el logout antes que el useEffect corra
+      await new Promise(resolve => setTimeout(resolve, 300));
     }
+    
+    setIsProcessingLogin(false);
+
+    let msg = "No se pudo iniciar sesión. Verifica tu correo y contraseña.";
+    if (err?.code === "auth/invalid-credential" || err?.code === "auth/user-not-found" || err?.code === "auth/wrong-password") {
+      msg = "Correo o contraseña incorrectos.";
+    } else if (err?.message) {
+      msg = err.message;
+    }
+
+    toast({
+      title: "Error de inicio de sesión",
+      description: msg,
+      variant: "destructive",
+    });
+  } finally {
+    setLoading(false);
   }
+  };
 
 
   return (
@@ -180,4 +180,3 @@ export default function LoginPage() {
     </div>
   );
 }
-

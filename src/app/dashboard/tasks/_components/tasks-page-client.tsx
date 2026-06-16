@@ -87,33 +87,12 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
           if (response.ok) {
             const roleData = await response.json();
             if (mounted) setIsAdmin(roleData.isAdmin);
-          } else {
-            if (email) {
-              const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
-                .split(',')
-                .map(s => s.trim().toLowerCase())
-                .filter(Boolean);
-              const isEnvAdmin = adminEnv.includes(email);
-              if (mounted) setIsAdmin(isEnvAdmin);
-            } else {
-              if (mounted) setIsAdmin(false);
-            }
           }
         } else {
           if (mounted) setIsAdmin(false);
         }
       } catch (error) {
         console.error('Error verificando rol de usuario:', error);
-        if (email) {
-          const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
-            .split(',')
-            .map(s => s.trim().toLowerCase())
-            .filter(Boolean);
-          const isEnvAdmin = adminEnv.includes(email);
-          if (mounted) setIsAdmin(isEnvAdmin);
-        } else {
-          if (mounted) setIsAdmin(false);
-        }
       } finally {
         if (mounted) setCheckingAdmin(false);
       }
@@ -480,7 +459,7 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
             title: `${completedTitlePrefix}: ${baseTask.code ?? ''} - ${baseTask.area ?? 'Área sin nombre'}`,
             message: `Ejecutado por: ${executedBy.name}\nPrioridad: ${baseTask.priority ?? ''}\nTrabajo: ${workDone}`,
             type: "task_alert",
-            severity: "success",
+            severity: "info",
             read: false,
             refId: taskId,
             status: "Completada",

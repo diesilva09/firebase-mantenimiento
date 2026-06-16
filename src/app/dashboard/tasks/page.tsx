@@ -2,14 +2,7 @@
 
 import { Suspense } from 'react'
 import TasksPageClient from './_components/tasks-page-client'
-
-// Datos de ejemplo para usuarios (puedes obtenerlos de tu BD)
-const users = [
-  { id: '1', name: 'Juan Pérez', avatarUrl: 'https://picsum.photos/seed/juan/40/40' },
-  { id: '2', name: 'María García', avatarUrl: 'https://picsum.photos/seed/maria/40/40' },
-  { id: '3', name: 'Carlos López', avatarUrl: 'https://picsum.photos/seed/carlos/40/40' },
-  { id: '4', name: 'Ana Rodríguez', avatarUrl: 'https://picsum.photos/seed/ana/40/40' },
-]
+import { users } from '@/lib/data'
 
 // Loading component
 function TasksLoading() {
