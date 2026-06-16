@@ -12,20 +12,43 @@ export async function POST(req: Request) {
       }, { status: 400 });
     }
 
-    // Validar email contra base de datos de usuarios autorizados
-    // Aquí puedes implementar la lógica específica para tu sistema
-    const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',')?.map(e => e.trim().toLowerCase()) || [];
-    const cleanEmail = email.toLowerCase();
-    
-    const techEmails = process.env.TECNICO_EMAILS?.split(',')?.map(e => e.trim().toLowerCase()) || [];
+    // 1. Intentar buscar al usuario en la base de datos
+    const existingUser = await query(
+      'SELECT id, email, rol, activo FROM usuarios WHERE id = $1 OR email = $2', 
+      [uid, email.toLowerCase()]
+    );
 
-    const isJefe = adminEmails.includes(cleanEmail);
-    const isTecnico = techEmails.includes(cleanEmail);
-    
-    // Aquí puedes implementar lógica más compleja como verificar en una tabla de usuarios
-    // const userQuery = await query('SELECT role FROM usuarios WHERE email = $1', [email]);
-    // const userRole = userQuery.rows[0]?.role || 'user';
-    
+    let dbUser = existingUser.rows[0];
+
+    // 2. Si el usuario NO existe, lo creamos (Auto-registro/Migración)
+    if (!dbUser) {
+      // Determinamos el rol inicial usando las variables de entorno actuales (solo para el primer registro)
+      const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase());
+      const isInitialAdmin = adminEmails.includes(email.toLowerCase());
+      const initialRol = isInitialAdmin ? 'JEFE' : 'TECNICO';
+      const defaultName = email.split('@')[0];
+
+      await query(
+        'INSERT INTO usuarios (id, email, rol, activo, nombre) VALUES ($1, $2, $3, $4, $5)',
+        [uid, email.toLowerCase(), initialRol, true, defaultName]
+      );
+
+      // Creamos un objeto temporal para la respuesta inmediata
+      dbUser = { rol: initialRol, activo: true };
+    }
+
+    // 3. Si el usuario existe pero está desactivado
+    if (!dbUser.activo) {
+      return NextResponse.json({
+        isAdmin: false,
+        role: 'NONE',
+        permissions: []
+      });
+    }
+
+    const isJefe = dbUser.rol === 'JEFE';
+    const isTecnico = dbUser.rol === 'TECNICO';
+
     return NextResponse.json({
       isAdmin: isJefe,
       role: isJefe ? 'JEFE' : (isTecnico ? 'TECNICO' : 'NONE'),

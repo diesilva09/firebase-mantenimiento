@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast"
 import { useEquipos } from "@/hooks/use-equipos"
 import { Eye } from "lucide-react"
 import { Input } from "@/components/ui/input"
+import { useUser } from "@/firebase/auth/use-user"
 import { useNotificationsContext as useNotifications } from "@/context/notifications-context"
 import { useSearchParams } from "next/navigation"
 import type { Notification } from "@/lib/types"
@@ -42,6 +43,7 @@ export default function UsosRepuestosPage() {
   const { permission, refreshNotifications } = useNotifications()
   const searchParams = useSearchParams();
   const selectedUsageId = searchParams.get("selectedUsageId");
+  const { user } = useUser();
 
   const [tab, setTab] = useState<"pendiente" | "completado">("pendiente")
   const [usos, setUsos] = useState<UsoRepuestoItem[]>([])
@@ -63,16 +65,26 @@ export default function UsosRepuestosPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [usoIdToDelete, setUsoIdToDelete] = useState<number | null>(null)
 
-  // Determinar si el usuario es jefe/admin leyendo la bandera guardada en login
+  // Determinar si el usuario es jefe/admin consultando la API de roles
   useEffect(() => {
-    if (typeof window === "undefined") return
-    try {
-      const flag = localStorage.getItem("isAdmin") === "true"
-      setIsAdmin(flag)
-    } catch {
-      setIsAdmin(false)
+    async function checkRole() {
+      if (!user?.email) return;
+      try {
+        const res = await fetch('/api/auth/role', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: user.email, uid: user.uid }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setIsAdmin(data.isAdmin);
+        }
+      } catch (err) {
+        console.error("Error verificando rol:", err);
+      }
     }
-  }, [])
+    checkRole();
+  }, [user])
 
   // Manejar selección de uso de repuesto desde notificaciones (Navegación y apertura automática)
   useEffect(() => {

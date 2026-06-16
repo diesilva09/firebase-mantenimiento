@@ -161,41 +161,13 @@ export default function EquiposPage() {
           if (response.ok) {
             const roleData = await response.json();
             if (mounted) setIsAdmin(roleData.isAdmin);
-          } else {
-            // Fallback a verificación local si la API falla
-            const email = user.email?.toLowerCase().trim()
-            if (email) {
-              const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
-                .split(',')
-                .map((s) => s.trim().toLowerCase())
-                .filter(Boolean)
-
-              const isEnvAdmin = adminEnv.includes(email)
-              if (mounted) setIsAdmin(isEnvAdmin)
-              if (mounted) setIsAdmin(isEnvAdmin && user.emailVerified)
-            } else {
-              if (mounted) setIsAdmin(false)
-            }
           }
         } else {
           if (mounted) setIsAdmin(false)
         }
       } catch (error) {
         console.error('Error verificando rol de usuario:', error);
-        // Fallback seguro
-        const email = user?.email?.toLowerCase().trim()
-        if (email) {
-          const adminEnv = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
-            .split(',')
-            .map((s) => s.trim().toLowerCase())
-            .filter(Boolean)
-
-          const isEnvAdmin = adminEnv.includes(email)
-          if (mounted) setIsAdmin(isEnvAdmin)
-          if (mounted) setIsAdmin(isEnvAdmin && user.emailVerified)
-        } else {
-          if (mounted) setIsAdmin(false)
-        }
+        if (mounted) setIsAdmin(false)
       } finally {
         if (mounted) setCheckingAdmin(false)
       }

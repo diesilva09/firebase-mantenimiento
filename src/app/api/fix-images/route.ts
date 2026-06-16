@@ -6,7 +6,8 @@ export async function GET() {
   try {
     // 1. Traer todos los equipos que tienen imagen
     // Seleccionamos solo lo necesario para no saturar la memoria
-    const { rows } = await query("SELECT id, codigo, imagen_url FROM equipos WHERE imagen_url IS NOT NULL")
+    // Agregamos un LIMIT para evitar exceder tiempos de ejecución en serverless
+    const { rows } = await query("SELECT id, codigo, imagen_url FROM equipos WHERE imagen_url IS NOT NULL LIMIT 100")
 
     let processed = 0
     let skipped = 0
