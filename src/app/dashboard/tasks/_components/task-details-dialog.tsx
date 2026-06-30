@@ -14,6 +14,7 @@ import type { Task } from "@/lib/types"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { Edit } from "lucide-react"
+import { MultiFileSection } from "@/components/multi-file-viewer"
 
 interface TaskDetailsDialogProps {
   isOpen: boolean
@@ -133,47 +134,11 @@ export function TaskDetailsDialog({
               </div>
             )}
 
-            {task.imageUrlBefore && (
-              <div className="flex items-center justify-between bg-muted/50 p-2 rounded-md">
-                <span className="text-sm font-medium"> Imagen Antes</span>
-                <a
-                  href={task.imageUrlBefore}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline font-medium"
-                >
-                  Ver en Drive →
-                </a>
-              </div>
-            )}
-
-            {task.imageUrlAfter && (
-              <div className="flex items-center justify-between bg-muted/50 p-2 rounded-md">
-                <span className="text-sm font-medium"> Imagen Después</span>
-                <a
-                  href={task.imageUrlAfter}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline font-medium"
-                >
-                  Ver en Drive →
-                </a>
-              </div>
-            )}
-
-            {task.anexoUrl && (
-              <div className="flex items-center justify-between bg-muted/50 p-2 rounded-md">
-                <span className="text-sm font-medium"> Anexo</span>
-                <a
-                  href={task.anexoUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline font-medium"
-                >
-                  Ver en Drive →
-                </a>
-              </div>
-            )}
+            <MultiFileSection 
+              imagenAntesUrl={(task as any).imageUrlBefore}
+              imagenDespuesUrl={(task as any).imageUrlAfter}
+              anexoUrl={(task as any).anexoUrl}
+            />
 
         </div>
         <DialogFooter className="sm:justify-start gap-2">

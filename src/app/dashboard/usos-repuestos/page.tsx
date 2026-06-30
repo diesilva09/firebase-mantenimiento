@@ -13,7 +13,6 @@ import { Input } from "@/components/ui/input"
 import { useUser } from "@/firebase/auth/use-user"
 import { useNotificationsContext as useNotifications } from "@/context/notifications-context"
 import { useSearchParams } from "next/navigation"
-import type { Notification } from "@/lib/types"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 
@@ -40,7 +39,7 @@ interface UsoRepuestoItem {
 
 export default function UsosRepuestosPage() {
   const { toast } = useToast()
-  const { permission, refreshNotifications } = useNotifications()
+  const { refreshNotifications } = useNotifications()
   const searchParams = useSearchParams();
   const selectedUsageId = searchParams.get("selectedUsageId");
   const { user } = useUser();
@@ -298,32 +297,6 @@ export default function UsosRepuestosPage() {
         // Refrescar la lista de notificaciones en la campana
         if (refreshNotifications) refreshNotifications();
 
-        // Notificación del navegador (si el usuario la permitió)
-        if (
-          permission === "granted" &&
-          typeof window !== "undefined" &&
-          "Notification" in window
-        ) {
-          const notification = new Notification(notifTitle, {
-            body: notifMessage,
-            tag: `uso-completado-${selectedUso.id}`,
-            data: {
-              url: `/dashboard/usos-repuestos?selectedUsageId=${selectedUso.id}`,
-              type: "spare_part_usage",
-              spareUsageId: selectedUso.id,
-              repuestoId: selectedUso.id
-            }
-          });
-
-          notification.addEventListener('click', (event) => {
-            event.preventDefault();
-            window.focus();
-            // Navegar a la URL específica
-            if (notification.data?.url) {
-              window.location.href = notification.data.url;
-            }
-          });
-        }
       } catch (e) {
         console.warn("No se pudo crear la notificación de uso completado", e)
       }

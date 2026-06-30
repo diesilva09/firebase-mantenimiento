@@ -17,6 +17,9 @@ const historialSchema = z.object({
   imagen_antes_url: z.string().optional().nullable(),
   imagen_despues_url: z.string().optional().nullable(),
   anexo_url: z.string().optional().nullable(),
+  es_solicitada: z.boolean().optional().nullable(),
+  solicitud_id: z.number().optional().nullable(),
+  origen_orden: z.string().optional().nullable(),
 })
 
 export async function POST(req: Request) {
@@ -37,6 +40,9 @@ export async function POST(req: Request) {
       imagen_antes_url: body.imagen_antes_url ?? body.imagenAntesUrl ?? null,
       imagen_despues_url: body.imagen_despues_url ?? body.imagenDespuesUrl ?? null,
       anexo_url: body.anexo_url ?? body.anexoUrl ?? null,
+      es_solicitada: body.es_solicitada ?? body.esSolicitada ?? false,
+      solicitud_id: body.solicitud_id ?? body.solicitudId ?? null,
+      origen_orden: body.origen_orden ?? body.origenOrden ?? "manual",
     }
 
     // codigo_equipo es obligatorio: si no viene, devolvemos 400 en vez de insertar NULL
@@ -69,9 +75,12 @@ export async function POST(req: Request) {
          creado_por,
          imagen_antes_url,
          imagen_despues_url,
-         anexo_url
+         anexo_url,
+         es_solicitada,
+         solicitud_id,
+         origen_orden
        ) VALUES (
-         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
        )
        RETURNING *`,
       [
@@ -87,6 +96,9 @@ export async function POST(req: Request) {
         data.imagen_antes_url ?? null,
         data.imagen_despues_url ?? null,
         data.anexo_url ?? null,
+        data.es_solicitada ?? false,
+        data.solicitud_id ?? null,
+        data.origen_orden ?? "manual",
       ],
     )
     return NextResponse.json({ data: rows[0] })

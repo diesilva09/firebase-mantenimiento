@@ -412,8 +412,6 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
         anticipacion_dias: data.frecuencia === 'ninguna' ? null : (data.anticipacionDias ?? 30),
       };
 
-      console.log('Enviando tarea a la BD:', tareaData);
-
       const response = await fetch('/api/tareas', {
         method: 'POST',
         headers: {

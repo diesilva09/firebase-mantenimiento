@@ -81,42 +81,18 @@ model EquiposHistorial {
 }
 
 model Tarea {
-  id                   Int               @id @default(autoincrement())
+  id                   Int       @id @default(autoincrement())
   orden_mantenimiento_id Int
   titulo               String
   descripcion          String?
-  estado               String            @default("pendiente")
-  fecha_inicio         DateTime?         @db.Timestamp(6)
-  fecha_fin            DateTime?         @db.Timestamp(6)
+  estado               String    @default("pendiente")
+  fecha_inicio         DateTime? @db.Timestamp(6)
+  fecha_fin            DateTime? @db.Timestamp(6)
   responsable          String?
-  prioridad            String?           @default("media")
-  creado_en            DateTime          @default(now()) @db.Timestamp(6)
-  actualizado_en       DateTime?         @updatedAt
+  prioridad            String?   @default("media")
+  creado_en            DateTime  @default(now()) @db.Timestamp(6)
+  actualizado_en       DateTime? @updatedAt
 
   ordenMantenimiento   OrdenMantenimiento @relation(fields: [orden_mantenimiento_id], references: [id], onDelete: Cascade)
   historial            EquiposHistorial[]
-  cronogramas          TareaCronograma[]  // Relación con TareaCronograma
-  vistas               TareaVista[]       // Relación con TareaVista
 }
-model TareaCronograma {
-  id          Int       @id @default(autoincrement())
-  tarea_id    Int
-  fecha_inicio DateTime  @db.Timestamp(6)
-  fecha_fin    DateTime? @db.Timestamp(6)
-  estado      String    @default("pendiente")
-  creado_en   DateTime  @default(now()) @db.Timestamp(6)
-  actualizado_en DateTime? @updatedAt
-
-  tarea Tarea @relation(fields: [tarea_id], references: [id], onDelete: Cascade)
-}
-
-model TareaVista {
-  id          Int       @id @default(autoincrement())
-  tarea_id    Int
-  usuario_id  String
-  visto_en    DateTime  @default(now()) @db.Timestamp(6)
-
-  tarea Tarea @relation(fields: [tarea_id], references: [id], onDelete: Cascade)
-  @@unique([tarea_id, usuario_id])
-}
-

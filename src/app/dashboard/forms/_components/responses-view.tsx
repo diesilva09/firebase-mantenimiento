@@ -30,6 +30,8 @@ import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { useToast } from "@/hooks/use-toast"
+import { MultiFileViewer } from "@/components/multi-file-viewer"
+import { useLiveRefresh } from "@/hooks/use-live-refresh"
 
 interface ResponsesViewProps {
   submissions?: Submission[]; // Hacer opcional para poder usar sin props
@@ -59,6 +61,12 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
 
   const { equipos } = useEquipos()
 
+  const fileViewerConfig: Record<string, { label: string; variant: "blue" | "green" | "orange"; isImage: boolean }> = {
+    "Fotos Antes": { label: "Fotos Antes", variant: "blue", isImage: true },
+    "Fotos Después": { label: "Fotos Después", variant: "green", isImage: true },
+    "Archivos Anexos": { label: "Archivos Anexos", variant: "orange", isImage: false },
+  }
+
   const formatEquipoLabel = React.useCallback(
     (raw: string) => {
       const codigo = raw.trim()
@@ -83,27 +91,39 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
     [equipos],
   )
 
-  React.useEffect(() => {
-    const loadData = async () => {
-      if (initialSubmissions && initialForms) return
-        
-      try {
+  const loadData = React.useCallback(async (options?: { silent?: boolean }) => {
+    try {
+      if (!options?.silent) {
         setLoading(true)
-        const [submissionsData, formsData] = await Promise.all([
-          getAllSubmissions(),
-          getFormsMetadata()
-        ])
-        setSubmissions(submissionsData)
-        setForms(formsData)
-      } catch (error) {
-        console.error('Error loading submissions:', error)
-      } finally {
+      }
+
+      const [submissionsData, formsData] = await Promise.all([
+        getAllSubmissions(),
+        initialForms ? Promise.resolve(initialForms) : getFormsMetadata(),
+      ])
+
+      setSubmissions(submissionsData)
+      setForms(formsData)
+    } catch (error) {
+      console.error('Error loading submissions:', error)
+    } finally {
+      if (!options?.silent) {
         setLoading(false)
       }
     }
+  }, [initialForms])
 
-    loadData()
-  }, [initialSubmissions, initialForms])
+  React.useEffect(() => {
+    if (initialSubmissions && initialForms) return
+    void loadData()
+  }, [initialForms, initialSubmissions, loadData])
+
+  useLiveRefresh({
+    callback: () => loadData({ silent: true }),
+    scopes: ["responses", "maintenance-orders", "maintenance-requests"],
+    intervalMs: 25000,
+    immediate: false,
+  })
 
   const filteredSubmissions = submissions.filter(
     (submission) => {
@@ -247,12 +267,13 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
         setIsDeleteDialogOpen(false)
         setEditingSubmission(null)
         toast({
-          title: "✅ Registro eliminado",
+          title: "Registro eliminado",
           description: "El registro se ha eliminado exitosamente.",
+          variant: "success",
         })
       } else {
         toast({
-          title: "❌ Error",
+          title: "Error al eliminar el registro",
           description: "No se pudo eliminar el registro.",
           variant: "destructive",
         })
@@ -260,7 +281,7 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
     } catch (error) {
       console.error('Error eliminando:', error)
       toast({
-        title: "❌ Error",
+        title: "Error al eliminar el registro",
         description: "No se pudo eliminar el registro.",
         variant: "destructive",
       })
@@ -270,7 +291,7 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
   }
 
   // Verificar si un formulario es editable (desactivado)
-  const isEditableForm = (form: string) => {
+  const isEditableForm = (_form: string) => {
     return false
   }
 
@@ -430,7 +451,7 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
 
       {selectedSubmission && (
         <Dialog open={isDetailViewOpen} onOpenChange={setIsDetailViewOpen}>
-          <DialogContent className="sm:max-w-lg">
+          <DialogContent className="sm:max-w-2xl lg:max-w-4xl">
             <DialogHeader>
               <DialogTitle>Detalle de Respuesta</DialogTitle>
               <DialogDescription>{selectedSubmission.formTitle}</DialogDescription>
@@ -445,9 +466,11 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
                   return true
                 })
                 .map(([key, value]) => (
-                <div key={key} className="grid grid-cols-3 gap-4 items-start">
-                  <span className="text-muted-foreground capitalize font-medium text-sm col-span-1">{key.replace(/([A-Z])/g, ' $1')}:</span>
-                  <div className="col-span-2 text-sm max-w-sm whitespace-pre-wrap break-all">
+                <div key={key} className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-4 lg:grid-cols-12">
+                  <span className="text-muted-foreground capitalize font-medium text-sm sm:col-span-1 lg:col-span-4">
+                    {key.replace(/([A-Z])/g, ' $1')}:
+                  </span>
+                  <div className="text-sm min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] sm:col-span-2 lg:col-span-8">
                     {Array.isArray(value) ? (
                       <div className="space-y-2">
                         {value.map((item, index) => (
@@ -455,7 +478,7 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
                             {Object.entries(item).map(([itemKey, itemValue]) => (
                                <div key={itemKey} className="flex justify-between text-xs gap-2">
                                  <span className="text-muted-foreground capitalize shrink-0">{itemKey.replace(/([A-Z])/g, ' $1')}:</span>
-                                 <span className="whitespace-pre-wrap break-all text-right max-w-xs">{String(itemValue)}</span>
+                                 <span className="text-right min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{String(itemValue)}</span>
                                </div>
                             ))}
                           </Card>
@@ -466,12 +489,24 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
                         const stringValue = String(value)
                         const trimmed = stringValue.trim()
                         const equipoMatch = equipos.find(e => e.codigo === trimmed)
+                        const fileViewer = fileViewerConfig[key]
+
+                        if (fileViewer) {
+                          return (
+                            <MultiFileViewer
+                              urls={stringValue}
+                              label={fileViewer.label}
+                              variant={fileViewer.variant}
+                              isImage={fileViewer.isImage}
+                            />
+                          )
+                        }
 
                         if (equipoMatch) {
                           return (
                             <button
                               onClick={() => handleEquipoClick(equipoMatch)}
-                              className="font-semibold whitespace-pre-wrap break-all inline-block max-w-xs text-blue-600 hover:underline text-left"
+                              className="font-semibold inline-block min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-blue-600 hover:underline text-left"
                             >
                               {formatEquipoLabel(stringValue)}
                             </button>
@@ -479,7 +514,7 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
                         }
 
                         return (
-                          <span className="font-semibold whitespace-pre-wrap break-all inline-block max-w-xs">
+                          <span className="font-semibold inline-block min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                             {key.toLowerCase() === 'equipo'
                               ? formatEquipoLabel(stringValue)
                               : stringValue}
@@ -569,9 +604,6 @@ export function ResponsesView({ submissions: initialSubmissions, forms: initialF
                 Esta acción no se puede deshacer.
               </DialogDescription>
             </DialogHeader>
-            <div className="bg-muted p-3 rounded-md text-sm">
-              <p><strong>ID:</strong> {editingSubmission.id}</p>
-            </div>
             <DialogFooter className="gap-2">
               <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeleting}>
                 Cancelar

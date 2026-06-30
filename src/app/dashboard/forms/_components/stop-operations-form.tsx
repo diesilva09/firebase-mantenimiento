@@ -124,8 +124,6 @@ export function StopOperationsForm() {
       tecnico_encargado: values.tecnico,
     };
 
-    console.log('Enviando parada a la BD:', paradaData);
-
     // Guardar en la base de datos
     const response = await fetch('/api/paradas-operativas', {
       method: 'POST',
@@ -161,8 +159,9 @@ export function StopOperationsForm() {
     }
 
     toast({
-      title: "✅ Parada Guardada ",
-      description: `Parada operativa registrada exitosamente`,
+      title: "Parada operativa guardada exitosamente",
+      description: `La parada operativa ha sido registrada correctamente.`,
+      variant: "success",
     });
     
     form.reset();
@@ -171,7 +170,7 @@ export function StopOperationsForm() {
   } catch (error) {
     console.error('Error guardando parada:', error);
     toast({
-      title: "❌ Error",
+      title: "Error al guardar la parada",
       description: error instanceof Error ? error.message : "No se pudo guardar la parada",
       variant: "destructive",
     });

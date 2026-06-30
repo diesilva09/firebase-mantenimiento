@@ -155,6 +155,13 @@ export function EquipmentDetailModal({
     }
   }
 
+  const handleNavigateToAttachments = () => {
+    if (equipment) {
+      router.push(`/dashboard/equipos/${encodeURIComponent(equipment.codigo)}?view=anexos`)
+      onClose()
+    }
+  }
+
   return (
     <>
       <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -332,15 +339,13 @@ export function EquipmentDetailModal({
               {/* Ficha técnica */}
               {equipment.attachmentsUrl && (
                 <div className="pt-4 border-t">
-                  <a
-                    href={equipment.attachmentsUrl}
-                    target="_blank"
-                    rel="noreferrer"
+                  <button
+                    type="button"
+                    onClick={handleNavigateToAttachments}
                     className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
                   >
-                    <span></span>
-                    <span>Ver ficha técnica completa (Anexos)</span>
-                  </a>
+                    <span>Ver anexos del equipo</span>
+                  </button>
                 </div>
               )}
             </div>

@@ -15,26 +15,40 @@ async function fetchOrdenesMantenimiento(): Promise<Submission[]> {
     const result = await response.json();
     const data = result.data;
 
-    return data.map((item: any) => ({
-      id: `om-${item.id}`,
-      form: 'ordenes-mantenimiento',
-      formTitle: 'Órdenes de Mantenimiento',
-      submittedAt: item.creado_en || new Date().toISOString(),
-      data: {
-        'Número Orden': item.numero_orden,
-        'Equipo': item.codigo_equipo || item.equipo_nombre,
-        'Tipo Mantenimiento': item.tipo_mantenimiento,
-        'Fecha Ejecución': formatDate(item.fecha_solicitud),
-        'Hora Inicio': item.hora_inicio,
-        'Hora Fin': item.hora_fin,
-        'Responsable': item.responsable,
-        'Descripción del trabajo realizado': item.descripcion_falla,
-        'Repuestos Utilizados': item.repuestos_utilizados,
-        'Observaciones / Recomendaciones': item.observaciones,
-        'Prioridad': item.prioridad,
-        'Estado': item.estado
+    return data.map((item: any) => {
+      const referenciaPrincipal =
+        item.tipo_destino === 'equipo'
+          ? (item.codigo_equipo || item.equipo_nombre || '-')
+          : item.tipo_destino === 'locativo'
+            ? (item.zona || '-')
+            : (item.referencia_otro || '-');
+
+      return {
+        id: `om-${item.id}`,
+        form: 'ordenes-mantenimiento',
+        formTitle: 'Órdenes de Mantenimiento',
+        submittedAt: item.creado_en || new Date().toISOString(),
+        data: {
+          'Número Orden': item.numero_orden,
+          'Destino': item.tipo_destino || 'equipo',
+          'Referencia': referenciaPrincipal,
+          'Tipo Mantenimiento': item.tipo_mantenimiento,
+          'Fecha Ejecución': formatDate(item.fecha_solicitud),
+          'Hora Inicio': item.hora_inicio,
+          'Hora Fin': item.hora_fin,
+          'Responsable': item.responsable,
+          'Descripción del trabajo realizado': item.descripcion_falla,
+          'Repuestos Utilizados': item.repuestos_utilizados,
+          'Observaciones / Recomendaciones': item.observaciones,
+          'Prioridad': item.prioridad,
+          'Estado': item.estado,
+          'Origen': item.origen_orden || 'manual',
+          'Fotos Antes': item.imagen_antes_url || null,
+          'Fotos Después': item.imagen_despues_url || null,
+          'Archivos Anexos': item.anexo_url || null,
+        }
       }
-    }));
+    });
   } catch (error) {
     console.error('❌ [fetchOrdenesMantenimiento] Error:', error);
     return [];

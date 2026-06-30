@@ -134,8 +134,9 @@ export function EquipmentInspectionForm() {
 
       if (result.success) {
         toast({
-          title: "✅ Inspección Guardada",
-          description: "La inspección del equipo ha sido registrada.",
+          title: "Inspección guardada exitosamente",
+          description: "La inspección del equipo ha sido registrada correctamente.",
+          variant: "success",
         })
         form.reset()
         setEquipoQuery("")
@@ -146,7 +147,7 @@ export function EquipmentInspectionForm() {
     } catch (error: any) {
       console.error('Error:', error)
       toast({
-        title: "❌ Error",
+        title: "Error al guardar la inspección",
         description: error.message || "No se pudo guardar la inspección.",
         variant: "destructive",
       })

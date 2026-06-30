@@ -58,8 +58,7 @@ export function LocativeEquipmentForm() {
     },
   })
 
-  function onSubmit(values: z.infer<typeof formSchema>) {
-    console.log(values)
+  function onSubmit(_values: z.infer<typeof formSchema>) {
     toast({
       title: "Registro Guardado",
       description: "El formato RE-MTT-006 ha sido registrado.",

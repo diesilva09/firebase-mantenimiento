@@ -32,8 +32,7 @@ export function LocativeMaintenanceForm() {
     },
   })
 
-  function onSubmit(values: z.infer<typeof formSchema>) {
-    console.log(values)
+  function onSubmit(_values: z.infer<typeof formSchema>) {
     toast({
       title: "Solicitud Enviada",
       description: "La solicitud de mantenimiento locativo ha sido registrada.",

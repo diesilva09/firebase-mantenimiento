@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 
@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MoreHorizontal, Loader2, Eye, FolderOpen, Folder, ExternalLink, MapPin, Tag, FileText } from "lucide-react";
+import { MoreHorizontal, Loader2, Eye, Folder, MapPin, Tag, FileText } from "lucide-react";
 import { useUser } from "@/firebase/auth/use-user";
 import {
   DropdownMenu,
@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useDashboardSearch, SearchSuggestion } from "@/context/dashboard-search-context";
+import { emitLiveUpdate, useLiveRefresh } from "@/hooks/use-live-refresh";
 
 const AREAS_PARTES_ALTAS = [
   "Planta (Primer Piso)",
@@ -81,18 +82,14 @@ export function ZonasPageClient() {
     codigo: "",
     nombre: "",
     areaInput: "",
-    imagenesFolderUrl: "",
-    attachmentsUrl: "",
   });
 
   const setCodigo = (value: string) => setZonaForm(prev => ({ ...prev, codigo: value }));
   const setNombre = (value: string) => setZonaForm(prev => ({ ...prev, nombre: value }));
   const setAreaInput = (value: string) => setZonaForm(prev => ({ ...prev, areaInput: value }));
-  const setImagenesFolderUrl = (value: string) => setZonaForm(prev => ({ ...prev, imagenesFolderUrl: value }));
-  const setAttachmentsUrl = (value: string) => setZonaForm(prev => ({ ...prev, attachmentsUrl: value }));
 
   // Extraer valores individuales para compatibilidad
-  const { codigo, nombre, areaInput, imagenesFolderUrl, attachmentsUrl } = zonaForm;
+  const { codigo, nombre, areaInput } = zonaForm;
   const [saving, setSaving] = useState(false);
   const [zonas, setZonas] = useState<Zona[]>([]);
   const [loadingZonas, setLoadingZonas] = useState(false);
@@ -102,12 +99,9 @@ export function ZonasPageClient() {
   const { user } = useUser();
 
   const [isAdmin, setIsAdmin] = useState(false);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<Zona | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [checkingAdmin, setCheckingAdmin] = useState(true);
-
   const [codigoDuplicado, setCodigoDuplicado] = useState(false);
   const [loadingMantenimientosId, setLoadingMantenimientosId] = useState<string | null>(null);
 
@@ -117,32 +111,42 @@ export function ZonasPageClient() {
   // Estado para mantener el resaltado de la zona buscada
   const [highlightedZonaCodigo, setHighlightedZonaCodigo] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchZonas = async () => {
-      try {
+  const fetchZonas = useCallback(async (options?: { silent?: boolean }) => {
+    try {
+      if (!options?.silent) {
         setLoadingZonas(true);
+      }
 
-        // Cargar TODAS las zonas para poder validar códigos duplicados globalmente
-        const res = await fetch(`/api/zonas`, { cache: 'no-store' });
-        if (!res.ok) {
-          console.warn("Error cargando zonas");
-          setZonas([]);
-          return;
-        }
-
-        const json = await res.json();
-        const data = Array.isArray(json?.data) ? json.data : [];
-        setZonas(data);
-      } catch (e) {
-        console.error("Error cargando zonas", e);
+      const res = await fetch(`/api/zonas`, { cache: 'no-store' });
+      if (!res.ok) {
+        console.warn("Error cargando zonas");
         setZonas([]);
-      } finally {
+        return;
+      }
+
+      const json = await res.json();
+      const data = Array.isArray(json?.data) ? json.data : [];
+      setZonas(data);
+    } catch (e) {
+      console.error("Error cargando zonas", e);
+      setZonas([]);
+    } finally {
+      if (!options?.silent) {
         setLoadingZonas(false);
       }
-    };
+    }
+  }, []);
 
-    fetchZonas();
-  }, []); // Se ejecuta solo al montar el componente
+  useEffect(() => {
+    void fetchZonas();
+  }, [fetchZonas]);
+
+  useLiveRefresh({
+    callback: () => fetchZonas({ silent: true }),
+    scopes: ["zonas"],
+    intervalMs: 20000,
+    immediate: false,
+  })
 
   // Registrar sugerencias globales para zonas
   useEffect(() => {
@@ -159,9 +163,7 @@ export function ZonasPageClient() {
     let mounted = true;
 
     async function checkAdmin() {
-      setCheckingAdmin(true);
       const email = user?.email?.toLowerCase().trim();
-      setUserEmail(email || null);
 
       try {
         if (user) {
@@ -212,7 +214,7 @@ export function ZonasPageClient() {
           if (mounted) setIsAdmin(false);
         }
       } finally {
-        if (mounted) setCheckingAdmin(false);
+        // Sin estado visual de carga para este chequeo.
       }
     }
 
@@ -338,8 +340,6 @@ export function ZonasPageClient() {
     setCodigo("");
     setNombre("");
     setAreaInput(area ?? ""); // si hay área seleccionada, la sugerimos
-    setImagenesFolderUrl("");
-    setAttachmentsUrl("");
     setIsDialogOpen(true);
   };
 
@@ -370,8 +370,8 @@ export function ZonasPageClient() {
         area: areaInput || null,
         codigo: codigo || null,
         nombre: nombre.trim(),
-        imagenes_folder_url: imagenesFolderUrl || null,
-        attachments_url: attachmentsUrl || null,
+        imagenes_folder_url: null,
+        attachments_url: null,
       };
 
       const method = editingZona ? "PUT" : "POST";
@@ -399,6 +399,8 @@ export function ZonasPageClient() {
           setZonas((prev) => [...prev, updated]);
         }
       }
+
+      emitLiveUpdate(["zonas"]);
 
       toast({
         title: editingZona ? "Zona actualizada" : "Zona registrada",
@@ -429,8 +431,6 @@ export function ZonasPageClient() {
     setCodigo(zona.codigo || "");
     setNombre(zona.nombre || "");
     setAreaInput(zona.area || "");
-    setImagenesFolderUrl(zona.imagenes_folder_url || "");
-    setAttachmentsUrl(zona.attachments_url || "");
     setTipo(zona.tipo); // cambia la pestaña si hace falta
     setIsDialogOpen(true);
   };
@@ -450,6 +450,8 @@ export function ZonasPageClient() {
     }
 
     setZonas((prev) => prev.filter((z) => z.id !== deleteTarget.id));
+
+    emitLiveUpdate(["zonas"]);
 
     toast({
       title: "Zona eliminada",
@@ -481,6 +483,19 @@ export function ZonasPageClient() {
 
     setLoadingMantenimientosId(zona.id);
     router.push(`/dashboard/zonas/${encodeURIComponent(zona.codigo)}`);
+  };
+
+  const handleOpenAnexos = (zona: Zona) => {
+    if (!zona.codigo) {
+      toast({
+        title: "Sin código de zona",
+        description: "Esta zona no tiene código asignado. Asigna un código para gestionar sus anexos.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    router.push(`/dashboard/zonas/${encodeURIComponent(zona.codigo)}?view=anexos`);
   };
 
   return (
@@ -521,7 +536,7 @@ export function ZonasPageClient() {
               }}
             >
               <option value="ALL">Todas las áreas</option>
-              {areasForTipo.map((a) => (
+              {areasForTipo.map((a: string) => (
                 <option key={a} value={a}>
                   {a}
                 </option>
@@ -604,6 +619,9 @@ export function ZonasPageClient() {
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleOpenMantenimientos(z)}>
                                 Mantenimientos
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleOpenAnexos(z)}>
+                                Anexos
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -703,6 +721,9 @@ export function ZonasPageClient() {
                                 <DropdownMenuItem onClick={() => handleOpenMantenimientos(z)}>
                                   Mantenimientos
                                 </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleOpenAnexos(z)}>
+                                Anexos
+                              </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </td>
@@ -785,7 +806,7 @@ export function ZonasPageClient() {
                 </SelectTrigger>
                 <SelectContent position="popper" side="bottom" className="max-h-[300px]">
                   <SelectItem value="NONE">Seleccionar área</SelectItem>
-                  {areasForTipo.map((a) => (
+                  {areasForTipo.map((a: string) => (
                     <SelectItem key={a} value={a}>
                       {a}
                     </SelectItem>
@@ -820,33 +841,27 @@ export function ZonasPageClient() {
             </div>
 
             <div className="space-y-2 pt-2 border-t">
-              <Label htmlFor="zona-imagenes-folder" className="flex items-center gap-2">
-                <span>Carpeta de Imágenes (Drive)</span>
-              </Label>
-              <Input
-                id="zona-imagenes-folder"
-                placeholder="https://drive.google.com/drive/folders/..."
-                value={imagenesFolderUrl}
-                onChange={(e) => setImagenesFolderUrl(e.target.value)}
-              />
+              
               <p className="text-xs text-muted-foreground">
-                URL de la carpeta de Google Drive para imágenes de evidencia
+               
               </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="zona-attachments-folder" className="flex items-center gap-2">
-                <span>Carpeta de Anexos (Drive)</span>
-              </Label>
-              <Input
-                id="zona-attachments-folder"
-                placeholder="https://drive.google.com/drive/folders/..."
-                value={attachmentsUrl}
-                onChange={(e) => setAttachmentsUrl(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                URL de la carpeta de Google Drive para archivos anexos
-              </p>
+              {editingZona?.codigo && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsDialogOpen(false);
+                    handleOpenAnexos(editingZona);
+                  }}
+                >
+                  Ir a anexos de la zona
+                </Button>
+              )}
+              {!editingZona && (
+                <p className="text-xs text-muted-foreground">
+                  
+                </p>
+              )}
             </div>
           </div>
 
@@ -959,75 +974,26 @@ export function ZonasPageClient() {
                 </div>
               </div>
 
-              {/* Carpetas de Drive */}
               <div className="border-t pt-4 space-y-3">
                 <h4 className="text-sm font-medium flex items-center gap-2">
-                  <FolderOpen className="h-4 w-4" />
-                  Carpetas de Drive
+                  <Folder className="h-4 w-4" />
+                  Anexos de la zona
                 </h4>
-
-                {selectedZonaForDetails.imagenes_folder_url ? (
-                  <div className="flex items-start gap-2 p-3 bg-green-50 rounded-md">
-                    <FolderOpen className="h-4 w-4 text-green-600 mt-0.5" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-green-800">
-                        Carpeta de imágenes
-                      </p>
-                      <a
-                        href={selectedZonaForDetails.imagenes_folder_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-green-700 hover:underline inline-flex items-center gap-1 mt-1"
-                      >
-                        Abrir carpeta
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-start gap-2 p-3 bg-yellow-50 rounded-md">
-                    <FolderOpen className="h-4 w-4 text-yellow-600 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-medium text-yellow-800">
-                        Sin carpeta de imágenes
-                      </p>
-                      <p className="text-sm text-yellow-700">
-                        Esta zona no tiene una carpeta de imágenes configurada.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {selectedZonaForDetails.attachments_url ? (
-                  <div className="flex items-start gap-2 p-3 bg-blue-50 rounded-md">
-                    <Folder className="h-4 w-4 text-blue-600 mt-0.5" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-blue-800">
-                        Carpeta de anexos
-                      </p>
-                      <a
-                        href={selectedZonaForDetails.attachments_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-blue-700 hover:underline inline-flex items-center gap-1 mt-1"
-                      >
-                        Abrir carpeta
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-start gap-2 p-3 bg-yellow-50 rounded-md">
-                    <Folder className="h-4 w-4 text-yellow-600 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-medium text-yellow-800">
-                        Sin carpeta de anexos
-                      </p>
-                      <p className="text-sm text-yellow-700">
-                        Esta zona no tiene una carpeta de anexos configurada.
-                      </p>
-                    </div>
-                  </div>
+                <p className="text-sm text-muted-foreground">
+                  Los anexos de esta zona se gestionan desde su apartado de anexos, donde puedes adjuntar y visualizar archivos sin depender de links manuales de Drive.
+                </p>
+                {selectedZonaForDetails.codigo && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      const zona = selectedZonaForDetails;
+                      setSelectedZonaForDetails(null);
+                      handleOpenAnexos(zona);
+                    }}
+                  >
+                    Ver anexos de la zona
+                  </Button>
                 )}
               </div>
             </div>

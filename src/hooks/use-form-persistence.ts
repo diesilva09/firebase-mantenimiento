@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useCallback, useState, useRef } from "react"
-import type { Control, UseFormSetValue } from "react-hook-form"
+import type { Control, Path, UseFormSetValue } from "react-hook-form"
 
 /**
  * Hook para persistir los datos de un formulario en sessionStorage.
@@ -36,10 +36,16 @@ export function useFormPersistence<T extends Record<string, any>>(
       if (savedData && savedData !== lastSavedData.current) {
         const parsed = JSON.parse(savedData) as T
 
+        const excludedFields = new Set(options?.excludeFields ?? [])
+
         // Restaurar cada campo
         Object.entries(parsed).forEach(([key, value]) => {
+          if (excludedFields.has(key)) {
+            return
+          }
+
           if (value !== undefined && value !== null) {
-            setValue(key as keyof T, value as T[keyof T], {
+            setValue(key as Path<T>, value as any, {
               shouldValidate: false,
               shouldDirty: true,
             })

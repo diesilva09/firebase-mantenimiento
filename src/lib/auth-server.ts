@@ -16,6 +16,9 @@ const ROLE_ASSIGNMENTS = {
   TECNICO: [
     // Se recomienda agregar una variable de entorno para técnicos también: process.env.TECNICO_EMAILS
     ...(process.env.TECNICO_EMAILS || "").split(",").map(s => s.trim().toLowerCase()),
+  ].filter(Boolean),
+  INVITADO: [
+    ...(process.env.INVITADO_EMAILS || "").split(",").map(s => s.trim().toLowerCase()),
   ].filter(Boolean)
 }
 
@@ -52,9 +55,10 @@ export async function requireAdminFromRequest(req: Request) {
     // Determinar el rol basado en las listas definidas arriba
     const isJefe = ROLE_ASSIGNMENTS.JEFE.includes(email)
     const isTecnico = ROLE_ASSIGNMENTS.TECNICO.includes(email)
+    const isInvitado = ROLE_ASSIGNMENTS.INVITADO.includes(email)
 
     // Si no está en ninguna lista, no tiene acceso
-    if (!isJefe && !isTecnico) {
+    if (!isJefe && !isTecnico && !isInvitado) {
       return { ok: false, status: 403, message: "No autorizado" }
     }
 
@@ -62,7 +66,7 @@ export async function requireAdminFromRequest(req: Request) {
     return { 
       ok: true, 
       email, 
-      role: isJefe ? 'JEFE' : 'TECNICO' 
+      role: isJefe ? 'JEFE' : (isTecnico ? 'TECNICO' : 'INVITADO') 
     }
 
   } catch {

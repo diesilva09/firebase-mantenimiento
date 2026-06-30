@@ -66,8 +66,6 @@ export function MaintenanceMinuteForm() {
   setIsLoading(true)
   
   try {
-    console.log('Enviando datos:', values)
-    
     const response = await fetch('/api/maintenance-minutes', {
       method: 'POST',
       headers: {
@@ -76,10 +74,7 @@ export function MaintenanceMinuteForm() {
       body: JSON.stringify(values),
     })
 
-    console.log('Respuesta status:', response.status)
-    
     const responseText = await response.text()
-    console.log('Respuesta texto:', responseText)
 
     let result
     try {
@@ -91,8 +86,9 @@ export function MaintenanceMinuteForm() {
 
     if (result.success) {
       toast({
-        title: "✅ Minuta Guardada",
-        description: "El acta de la reunión ha sido registrada exitosamente.",
+        title: "Minuta guardada exitosamente",
+        description: "El acta de la reunión ha sido registrada correctamente.",
+        variant: "success",
       })
       form.reset({
         tecnico: "",
@@ -111,7 +107,7 @@ export function MaintenanceMinuteForm() {
   } catch (error: any) {
     console.error('Error completo:', error)
     toast({
-      title: "❌ Error",
+      title: "Error al guardar la minuta",
       description: error.message || "No se pudo guardar la minuta.",
       variant: "destructive",
     })
@@ -284,4 +280,3 @@ export function MaintenanceMinuteForm() {
     </Form>
   )
 }
-

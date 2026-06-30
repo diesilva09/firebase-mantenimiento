@@ -65,7 +65,7 @@ export default function LoginPage() {
     firebaseAuthenticated = true;
 
     // Intentamos obtener el usuario del objeto retornado (algunos wrappers devuelven el User directamente)
-    const firebaseUser = userCredential?.user || userCredential;
+    const firebaseUser = userCredential;
     const uid = firebaseUser?.uid;
     const userEmail = firebaseUser?.email || data.email;
 
@@ -131,7 +131,7 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen w-full flex-col items-center justify-center bg-background">
       <div className="mb-8 flex flex-col items-center text-center animate-in fade-in zoom-in-95 slide-in-from-top-8 duration-500">
-        <Logo width={200} height={100} className="mb-4" />
+        <Logo width={220} height={220} className="mb-4" />
         <h1 className="text-3xl font-bold">Area de Mantenimiento</h1>
         <p className="text-muted-foreground">Inicia sesión para gestionar labores</p>
       </div>

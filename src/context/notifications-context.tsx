@@ -1,8 +1,8 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Notification } from "@/lib/types";
-import { tasks } from "@/lib/data";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
 
 type NotificationPermissionState = NotificationPermission | "unsupported";
 
@@ -15,6 +15,7 @@ interface NotificationsContextValue {
   removeNotification: (id: string) => void;
   markTasksCompletedAsRead: (taskIds: string[]) => void;
   permission: NotificationPermissionState;
+  secureContext: boolean;
   requestPermission: () => Promise<NotificationPermissionState>;
   hideNotification: (id: string) => void;
   hideAllNotifications: () => void;
@@ -30,10 +31,11 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [permission, setPermission] = useState<NotificationPermissionState>("unsupported");
+  const [secureContext, setSecureContext] = useState(true);
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [readIds, setReadIds] = useState<string[]>([]);
 
-  const loadNotifications = async () => {
+  const loadNotifications = useCallback(async () => {
       try {
         const res = await fetch('/api/notificaciones', { cache: 'no-store' })
         if (!res.ok) return
@@ -53,9 +55,16 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       } catch (e) {
         console.error('Error cargando notificaciones desde BD', e)
       }
-    }
+    }, [])
   useEffect(() => {
     if (typeof window === "undefined") return;
+
+    const isLocalhost =
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1"
+
+    const isSecureNotificationsContext = window.isSecureContext || isLocalhost
+    setSecureContext(isSecureNotificationsContext)
 
     if (!("Notification" in window)) {
       setPermission("unsupported");
@@ -66,9 +75,11 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     setPermission(window.Notification.permission);
   }, []);
 
-  useEffect(() => {
-    loadNotifications()
-  }, [])
+  useLiveRefresh({
+    callback: loadNotifications,
+    scopes: ["notifications"],
+    intervalMs: 15000,
+  })
 
   // Cargar IDs ocultos desde localStorage
   useEffect(() => {
@@ -128,6 +139,18 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     if (typeof window === "undefined" || !("Notification" in window)) {
       setPermission("unsupported");
       return "unsupported";
+    }
+
+    const isLocalhost =
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1"
+
+    const isSecureNotificationsContext = window.isSecureContext || isLocalhost
+    setSecureContext(isSecureNotificationsContext)
+
+    if (!isSecureNotificationsContext) {
+      setPermission("unsupported")
+      return "unsupported"
     }
 
     try {
@@ -219,6 +242,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     removeNotification,
     markTasksCompletedAsRead,
     permission,
+    secureContext,
     requestPermission,
     hideNotification,
     hideAllNotifications,

@@ -1,6 +1,7 @@
 // hooks/use-equipos.ts
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useToast } from '@/hooks/use-toast'
+import { emitLiveUpdate, useLiveRefresh } from '@/hooks/use-live-refresh'
 
 // Definir los tipos que faltan
 type EquipmentArea = "conservas" | "salsas" | "frutos" | "etiquetado" | "ptar" | "servicio de apoyo" | "logistica" | "locativo" | "medicion"
@@ -41,11 +42,7 @@ export function useEquipos() {
   const [loading, setLoading] = useState(true)
   const { toast } = useToast()
 
-  useEffect(() => {
-    loadEquipos()
-  }, [])
-
-  const loadEquipos = async () => {
+  const loadEquipos = useCallback(async () => {
     setLoading(true)
     try {
       // Cargar siempre desde la API y reflejar exactamente lo que devuelva
@@ -99,7 +96,18 @@ export function useEquipos() {
     } finally {
       setLoading(false)
     }
-  } 
+  }, [])
+
+  useEffect(() => {
+    void loadEquipos()
+  }, [loadEquipos])
+
+  useLiveRefresh({
+    callback: loadEquipos,
+    scopes: ['equipos'],
+    intervalMs: 20000,
+    immediate: false,
+  })
 
   const createEquipo = async (equipoData: EquipmentForm): Promise<boolean> => {
     try {
@@ -130,18 +138,18 @@ export function useEquipos() {
           marca: equipoData.marca,
           modelo: equipoData.modelo,
           fabricante: equipoData.fabricante,
-          fechaImplementacion: equipoData.fechaImplementacion,
-          fechaAdquisicion: equipoData.fechaAdquisicion,
+          fecha_implementacion: equipoData.fechaImplementacion ?? null,
+          fecha_adquisicion: equipoData.fechaAdquisicion ?? null,
           capacidad: equipoData.capacidad,
           amperaje: equipoData.amperaje,
           potencia: equipoData.potencia,
           voltaje: equipoData.voltaje,
           rpm: equipoData.rpm,
-          magnitudMedida: equipoData.magnitudMedida,
+          magnitud_medida: equipoData.magnitudMedida,
           estado: equipoData.estado ?? 'Operativo',
           imagen_url: imageDataUrl ?? null,
-          attachmentsUrl: equipoData.attachmentsUrl ?? null,
-          imagenesFolderUrl: equipoData.imagenesFolderUrl ?? null,
+          attachments_url: equipoData.attachmentsUrl ?? null,
+          imagenes_folder_url: equipoData.imagenesFolderUrl ?? null,
         }),
       })
 
@@ -175,6 +183,7 @@ export function useEquipos() {
       }
 
       await loadEquipos()
+      emitLiveUpdate(['equipos'])
       
       toast({ 
         title: 'Equipo creado', 
@@ -262,6 +271,7 @@ export function useEquipos() {
 
       // Volver a cargar desde la API para mantener todo consistente
       await loadEquipos()
+      emitLiveUpdate(['equipos'])
       
       toast({ 
         title: 'Equipo actualizado', 
@@ -282,14 +292,10 @@ export function useEquipos() {
 
   const deleteEquipo = async (id: string): Promise<boolean> => {
     try {
-      console.log('🔄 Eliminando equipo ID:', id)
-
       // Eliminar de la API
       const response = await fetch(`/api/equipos?id=${id}`, {
         method: 'DELETE',
       })
-
-      console.log('📡 Response status:', response.status)
 
       if (!response.ok) {
         // Obtener el error real de la API
@@ -315,6 +321,8 @@ export function useEquipos() {
               description: 'El equipo ya no existía en la base de datos, se ha limpiado de la lista local.',
             })
 
+            emitLiveUpdate(['equipos'])
+
             return true
           }
         } catch {
@@ -325,8 +333,7 @@ export function useEquipos() {
         throw new Error(errorMessage)
       }
 
-      const result = await response.json()
-      console.log('✅ Eliminación exitosa:', result)
+      await response.json()
 
       // Eliminar localmente
       const updatedEquipos = equipos.filter(e => e.id !== id)
@@ -340,17 +347,20 @@ export function useEquipos() {
       }
 
       toast({
-        title: '✅ Equipo eliminado',
-        description: 'El equipo se ha eliminado correctamente.'
+        title: 'Equipo eliminado exitosamente',
+        description: 'El equipo se ha eliminado correctamente.',
+        variant: "success",
       })
+
+      emitLiveUpdate(['equipos'])
 
       return true
 
     } catch (error) {
-      console.error('❌ Error completo eliminando equipo:', error)
+      console.error('Error completo eliminando equipo:', error)
 
       toast({
-        title: '❌ Error al eliminar',
+        title: 'Error al eliminar el equipo',
         description: `No se pudo eliminar el equipo: ${error instanceof Error ? error.message : 'Error desconocido'}`,
         variant: 'destructive'
       })

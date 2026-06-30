@@ -33,7 +33,7 @@ export type Task = {
   anticipacion_dias?: number | null;
 };
 
-export type FormSlug = 'inspeccion-equipos' | 'orden-mantenimiento' | 'paradas-operativas' | 'consumo-diario' | 'mantenimiento-locativo' | 'solicitud-repuestos' | 're-mtt-007' | 're-mtt-006' | 'minuta-mtto' | 'ordenes-mantenimiento' | 'equipment-inspections' | 'spares-requests' | 'consumos-servicios' | 'maintenance-minutes';
+export type FormSlug = 'inspeccion-equipos' | 'orden-mantenimiento' | 'paradas-operativas' | 'consumo-diario' | 'mantenimiento-locativo' | 'solicitud-repuestos' | 're-mtt-007' | 're-mtt-006' | 'minuta-mtto' | 'ordenes-mantenimiento' | 'equipment-inspections' | 'spares-requests' | 'consumos-servicios' | 'maintenance-minutes' | 'solicitudes-mantenimiento';
 
 export type FormMetadata = {
   slug: FormSlug;

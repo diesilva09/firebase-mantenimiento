@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
@@ -13,14 +14,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TechnicianSelectField } from "./technician-select-field"
-import { AlertCircle, FolderOpen, ExternalLink, Image as ImageIcon, FileText, Folder, Link } from "lucide-react"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { FolderOpen, ExternalLink, Image as ImageIcon, FileText, Folder, Link } from "lucide-react"
+import { MultiFileUploader } from "@/components/multi-file-uploader"
+import { useUser } from "@/firebase/auth/use-user"
+import { useNotificationsContext as useNotifications } from "@/context/notifications-context"
+import { emitLiveUpdate } from "@/hooks/use-live-refresh"
 
 const formSchema = z.object({
   fecha: z.string().min(1, "La fecha es requerida."),
   equipo: z.string().optional(),
   codigoEquipo: z.string().optional(),
   zona: z.string().optional(),
+  otro: z.string().optional(),
   tipoMantenimiento: z.enum(["Correctivo", "Preventivo", "Rutinario"]),
   descripcionFalla: z.string().min(10, "La descripción debe tener al menos 10 caracteres."),
   repuestos: z.string().min(1, "Registra los repuestos o materiales empleados."),
@@ -29,13 +34,16 @@ const formSchema = z.object({
   observaciones: z.string().min(1, "Agrega observaciones o recomendaciones."),
   horaInicio: z.string().min(1, "La hora de inicio es requerida."),
   horaFin: z.string().min(1, "La hora de finalización es requerida."),
-  imageBeforeUrl: z.string().url().optional().or(z.literal("")),
-  imageAfterUrl: z.string().url().optional().or(z.literal("")),
-  anexoUrl: z.string().url().optional().or(z.literal("")),
+  imageBeforeUrl: z.string().optional().default(""),
+  imageAfterUrl: z.string().optional().default(""),
+  anexoUrl: z.string().optional().default(""),
 })
 
 export function MaintenanceOrderForm() {
   const { toast } = useToast()
+  const searchParams = useSearchParams()
+  const { user } = useUser()
+  const { refreshNotifications } = useNotifications()
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -43,6 +51,7 @@ export function MaintenanceOrderForm() {
       equipo: "",
       codigoEquipo: "",
       zona: "",
+      otro: "",
       tipoMantenimiento: "Correctivo",
       descripcionFalla: "",
       repuestos: "",
@@ -62,7 +71,10 @@ export function MaintenanceOrderForm() {
     "maintenance-order-form",
     form.control,
     form.setValue,
-    form.watch
+    form.watch,
+    {
+      excludeFields: ["imageBeforeUrl", "imageAfterUrl", "anexoUrl"],
+    }
   )
 
   type EquipmentLookup = { codigo: string; nombre: string; area?: string | null; linea?: string | null }
@@ -89,22 +101,90 @@ export function MaintenanceOrderForm() {
   const [zonaInfo, setZonaInfo] = useState<EquipoInfo | null>(null)
   const [loadingZona, setLoadingZona] = useState(false)
 
-  // Estado para la pestaña activa (equipo o locativo)
-  const [activeTab, setActiveTab] = useState<"equipo" | "locativo">("equipo")
+  // Estado para la pestaña activa (equipo, locativo u otro)
+  const [activeTab, setActiveTab] = useState<"equipo" | "locativo" | "otro">("equipo")
+  const sourceRequestId = searchParams.get("sourceRequestId")
+  const targetTabParam = searchParams.get("target")
 
   // Limpiar campos cuando cambia la pestaña
   useEffect(() => {
     if (activeTab === "equipo") {
       form.setValue("zona", "")
+      form.setValue("otro", "")
       setZonaQuery("")
       setZonaInfo(null)
+    } else if (activeTab === "locativo") {
+      form.setValue("equipo", "")
+      form.setValue("codigoEquipo", "")
+      form.setValue("otro", "")
+      setEquipoQuery("")
+      setEquipoInfo(null)
     } else {
       form.setValue("equipo", "")
       form.setValue("codigoEquipo", "")
+      form.setValue("zona", "")
       setEquipoQuery("")
+      setZonaQuery("")
       setEquipoInfo(null)
+      setZonaInfo(null)
     }
   }, [activeTab, form])
+
+  useEffect(() => {
+    if (targetTabParam === "equipo" || targetTabParam === "locativo" || targetTabParam === "otro") {
+      setActiveTab(targetTabParam)
+    }
+  }, [targetTabParam])
+
+  useEffect(() => {
+    const requestId = sourceRequestId ? Number(sourceRequestId) : NaN
+    if (!requestId || Number.isNaN(requestId)) {
+      return
+    }
+
+    let cancelled = false
+
+    const loadSourceRequest = async () => {
+      try {
+        const response = await fetch(`/api/solicitudes-mantenimiento?id=${requestId}`, {
+          cache: "no-store",
+        })
+
+        if (!response.ok) {
+          throw new Error("No se pudo cargar la solicitud de mantenimiento.")
+        }
+
+        const json = await response.json()
+        const request = Array.isArray(json?.data) ? json.data[0] : null
+        if (!request || cancelled) return
+
+        form.setValue("fecha", request.fecha_solicitud || new Date().toISOString().split("T")[0])
+        form.setValue("descripcionFalla", request.descripcion_solicitud || "")
+        // La evidencia de la orden debe registrarse manualmente; no se hereda desde la solicitud.
+        form.setValue("imageBeforeUrl", "")
+        form.setValue("imageAfterUrl", "")
+        form.setValue("anexoUrl", "")
+
+        if (targetTabParam === "equipo") {
+          form.setValue("equipo", request.area_equipo || "")
+          setEquipoQuery(request.area_equipo || "")
+        } else if (targetTabParam === "locativo") {
+          form.setValue("zona", request.area_equipo || "")
+          setZonaQuery(request.area_equipo || "")
+        } else if (targetTabParam === "otro") {
+          form.setValue("otro", request.area_equipo || "")
+        }
+      } catch (error) {
+        console.error("Error loading source maintenance request:", error)
+      }
+    }
+
+    loadSourceRequest()
+
+    return () => {
+      cancelled = true
+    }
+  }, [sourceRequestId, targetTabParam, form])
 
   // Función para extraer folder ID de un URL de carpeta de Drive
   const extractFolderId = (url: string | null | undefined): string | null => {
@@ -169,7 +249,6 @@ export function MaintenanceOrderForm() {
             linea: e.linea ?? null,
           }))
 
-        console.log('Equipos cargados desde API:', mapped.length, 'Primeros 5:', mapped.slice(0, 5).map(e => e.codigo));
         setEquipos(mapped)
         
         // Guardar en caché LIGERO (solo campos necesarios para evitar quota exceeded)
@@ -347,6 +426,9 @@ export function MaintenanceOrderForm() {
     if (activeTab === "locativo" && !values.zona?.trim()) {
       throw new Error('Debe seleccionar una zona.');
     }
+    if (activeTab === "otro" && !values.otro?.trim()) {
+      throw new Error('Debe ingresar una referencia para la orden.');
+    }
 
     // Extraer código del equipo si se seleccionó un equipo
     let codigoEquipo = values.codigoEquipo;
@@ -367,7 +449,6 @@ export function MaintenanceOrderForm() {
 
       if (equipoEncontrado) {
         codigoEquipo = equipoEncontrado.codigo;
-        console.log('Equipo encontrado por búsqueda:', equipoEncontrado.codigo, '-', equipoEncontrado.nombre);
       }
     }
 
@@ -382,12 +463,14 @@ export function MaintenanceOrderForm() {
       codigoZona = parts[0]?.trim() || null;
     }
 
-    console.log('Pestaña activa:', activeTab, '| Código de equipo final:', codigoEquipo, '| Zona:', values.zona, '| Código zona:', codigoZona);
-
     // Preparar datos para la base de datos
+    const requestId = sourceRequestId ? Number(sourceRequestId) : null
+    const isRequestedOrder = Boolean(requestId && !Number.isNaN(requestId))
+
     const ordenData = {
       codigo_equipo: activeTab === "equipo" ? codigoEquipo || null : null,
       zona: activeTab === "locativo" ? values.zona || null : null,
+      referencia_otro: activeTab === "otro" ? values.otro || null : null,
       tipo_mantenimiento: values.tipoMantenimiento,
       fecha_solicitud: values.fecha,
       responsable: values.responsableMantenimiento,
@@ -401,9 +484,10 @@ export function MaintenanceOrderForm() {
       imagen_antes_url: values.imageBeforeUrl || null,
       imagen_despues_url: values.imageAfterUrl || null,
       anexo_url: values.anexoUrl || null,
+      origen_orden: isRequestedOrder ? "solicitada" : "manual",
+      solicitud_id: isRequestedOrder ? requestId : null,
+      tipo_destino: activeTab,
     };
-
-    console.log('Enviando orden a la BD:', ordenData);
 
     // Guardar en la base de datos
     const response = await fetch('/api/ordenes-mantenimiento', {
@@ -420,9 +504,10 @@ export function MaintenanceOrderForm() {
     }
 
     const nuevaOrden = await response.json();
+    const isDuplicatedOrder = Boolean(nuevaOrden?.duplicated)
 
     // Crear registro en la hoja de vida correspondiente
-    if (activeTab === "equipo" && codigoEquipo) {
+    if (!isDuplicatedOrder && activeTab === "equipo" && codigoEquipo) {
       // Guardar en equipos_historial
       try {
         const historialPayload = {
@@ -438,6 +523,9 @@ export function MaintenanceOrderForm() {
           imagenAntesUrl: values.imageBeforeUrl || null,
           imagenDespuesUrl: values.imageAfterUrl || null,
           anexoUrl: values.anexoUrl || null,
+          esSolicitada: isRequestedOrder,
+          solicitudId: isRequestedOrder ? requestId : null,
+          origenOrden: isRequestedOrder ? "solicitada" : "manual",
         };
 
         await fetch('/api/equipos/historial', {
@@ -450,7 +538,7 @@ export function MaintenanceOrderForm() {
       } catch (e) {
         console.warn('No se pudo registrar la orden en equipos_historial', e);
       }
-    } else if (activeTab === "locativo" && codigoZona) {
+    } else if (!isDuplicatedOrder && activeTab === "locativo" && codigoZona) {
       // Guardar en zonas_historial
       try {
         const historialPayload = {
@@ -466,6 +554,9 @@ export function MaintenanceOrderForm() {
           imagenAntesUrl: values.imageBeforeUrl || null,
           imagenDespuesUrl: values.imageAfterUrl || null,
           anexoUrl: values.anexoUrl || null,
+          esSolicitada: isRequestedOrder,
+          solicitudId: isRequestedOrder ? requestId : null,
+          origenOrden: isRequestedOrder ? "solicitada" : "manual",
         };
 
         await fetch('/api/zonas/historial', {
@@ -480,26 +571,59 @@ export function MaintenanceOrderForm() {
       }
     }
 
-    // Opcional: mantener compatibilidad con localStorage temporalmente
-    try {
-      const fecha = new Date().toISOString().slice(0, 10);
-      const entry = {
-        ...values,
-        fecha,
-        createdAt: new Date().toISOString(),
-      };
+    if (isRequestedOrder) {
+      const completeResponse = await fetch('/api/solicitudes-mantenimiento', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: requestId,
+          estado: 'completado',
+          ordenId: nuevaOrden.id ?? null,
+          actorEmail: user?.email || null,
+          actorUid: user?.uid || null,
+        }),
+      })
 
-      const raw = typeof window !== "undefined" ? localStorage.getItem("maintenanceOrders") : null;
-      const arr = raw ? JSON.parse(raw) : [];
-      const next = [entry, ...arr];
-      localStorage.setItem("maintenanceOrders", JSON.stringify(next));
-    } catch (e) {
-      console.warn("No se pudo guardar en localStorage", e);
+      const completeJson = await completeResponse.json().catch(() => ({}))
+      if (!completeResponse.ok || completeJson?.success === false) {
+        throw new Error(completeJson?.error || 'La orden se creó, pero no se pudo completar la solicitud.')
+      }
+
+      if (completeJson?.warning) {
+        console.warn('Advertencia al completar la solicitud:', completeJson.warning)
+      }
     }
 
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("maintenanceOrders")
+      }
+    } catch (e) {
+      console.warn("No se pudo limpiar el respaldo local de órdenes", e);
+    }
+
+    try {
+      await refreshNotifications()
+    } catch (error) {
+      console.warn("No se pudieron refrescar las notificaciones", error)
+    }
+
+    emitLiveUpdate([
+      "maintenance-orders",
+      "maintenance-requests",
+      "responses",
+      "notifications",
+      "equipment-history",
+      "zone-history",
+    ])
+
     toast({
-      title: "✅ Orden Guardada en BD",
-      description: `Orden guardada exitosamente`,
+      title: isDuplicatedOrder ? "Orden ya existente" : "✅ Orden Guardada en BD",
+      description: isDuplicatedOrder
+        ? "La solicitud ya tenía una orden creada y se reutilizó ese registro."
+        : "Orden guardada exitosamente",
     });
 
     // Limpiar datos persistidos primero
@@ -511,6 +635,7 @@ export function MaintenanceOrderForm() {
       equipo: "",
       codigoEquipo: "",
       zona: "",
+      otro: "",
       tipoMantenimiento: "Correctivo",
       descripcionFalla: "",
       repuestos: "",
@@ -528,11 +653,10 @@ export function MaintenanceOrderForm() {
     setEquipoInfo(null);
     setZonaInfo(null);
     setActiveTab("equipo");
-
   } catch (error) {
     console.error('Error guardando orden:', error);
     toast({
-      title: "❌ Error",
+      title: "Error al guardar la orden",
       description: error instanceof Error ? error.message : "No se pudo guardar la orden",
       variant: "destructive",
     });
@@ -546,23 +670,11 @@ export function MaintenanceOrderForm() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
-        <FormField
-          control={form.control}
-          name="fecha"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Fecha</FormLabel>
-              <FormControl>
-                <Input type="date" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "equipo" | "locativo")} className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "equipo" | "locativo" | "otro")} className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="equipo">Equipo</TabsTrigger>
             <TabsTrigger value="locativo">Locativo</TabsTrigger>
+            <TabsTrigger value="otro">Otro</TabsTrigger>
           </TabsList>
           <TabsContent value="equipo" className="space-y-4 mt-4">
             <FormField
@@ -686,6 +798,24 @@ export function MaintenanceOrderForm() {
               )}
             />
           </TabsContent>
+          <TabsContent value="otro" className="space-y-4 mt-4">
+            <FormField
+              control={form.control}
+              name="otro"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Otro</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="Escribe el área, lugar, referencia o detalle correspondiente"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </TabsContent>
         </Tabs>
 
         <FormField
@@ -736,7 +866,7 @@ export function MaintenanceOrderForm() {
             </FormItem>
           )}
         />
-        <div className="grid md:grid-cols-2 gap-8">
+        <div className="grid gap-6">
           <FormField
             control={form.control}
             name="prioridad"
@@ -786,7 +916,7 @@ export function MaintenanceOrderForm() {
             </FormItem>
           )}
         />
-        <div className="grid md:grid-cols-2 gap-8">
+        <div className="grid gap-6 md:grid-cols-2">
           <FormField
             control={form.control}
             name="horaInicio"
@@ -817,219 +947,89 @@ export function MaintenanceOrderForm() {
 
         {/* Sección de Imágenes de Evidencia */}
         <div className="space-y-4 pt-4 border-t">
-          <h3 className="text-sm font-medium flex items-center gap-2">
-            <FolderOpen className="h-4 w-4" />
-            Imágenes de Evidencia (Antes/Después)
+          <h3 className="text-sm font-semibold flex items-center gap-2 text-slate-800">
+            <FolderOpen className="h-4 w-4 text-primary" />
+            Evidencia Fotográfica
           </h3>
 
-          {/* Estado de la carpeta de imágenes - Zona o Equipo */}
-          {loadingEquipo || loadingZona ? (
-            <Alert className="bg-gray-50 border-gray-200">
-              <AlertDescription className="text-sm">Cargando información de carpetas...</AlertDescription>
-            </Alert>
-          ) : zonaInfo?.imagenesFolderUrl ? (
-            <Alert className="bg-green-50 border-green-200">
-              <FolderOpen className="h-4 w-4 text-green-600" />
-              <AlertDescription className="text-sm text-green-800">
-                <strong>Carpeta de imágenes de la zona configurada:</strong>
-                <a
-                  href={zonaInfo.imagenesFolderUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 ml-2 text-green-700 hover:underline"
-                >
-                  Abrir carpeta <ExternalLink className="h-3 w-3" />
-                </a>
-              </AlertDescription>
-            </Alert>
-          ) : equipoInfo?.imagenesFolderUrl ? (
-            <Alert className="bg-green-50 border-green-200">
-              <FolderOpen className="h-4 w-4 text-green-600" />
-              <AlertDescription className="text-sm text-green-800">
-                <strong>Carpeta de imágenes del equipo configurada:</strong>
-                <a
-                  href={equipoInfo.imagenesFolderUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 ml-2 text-green-700 hover:underline"
-                >
-                  Abrir carpeta <ExternalLink className="h-3 w-3" />
-                </a>
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <Alert variant="default" className="bg-yellow-50 border-yellow-200">
-              <AlertCircle className="h-4 w-4 text-yellow-600" />
-              <AlertDescription className="text-sm text-yellow-800">
-                <strong>Sin carpeta configurada:</strong> Sube las imágenes a cualquier carpeta de Drive y pega los links aquí.
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Link Imagen Antes */}
-            <FormField
-              control={form.control}
-              name="imageBeforeUrl"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="flex items-center gap-2">
-                    <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                    Link de Drive - Imagen Antes
-                  </FormLabel>
-                  <FormControl>
-                    <Input
-                      placeholder="https://drive.google.com/file/d/..."
-                      {...field}
-                      className={validationErrors.imageBefore ? "border-orange-400 focus-visible:ring-orange-400" : ""}
-                      onChange={(e) => {
-                        field.onChange(e);
-                        const value = e.target.value;
-                        if (value && !isUrlFromFolder(value, zonaInfo?.imagenesFolderUrl || equipoInfo?.imagenesFolderUrl)) {
-                          setValidationErrors(prev => ({ ...prev, imageBefore: "⚠️ Este link no parece ser de la carpeta configurada" }));
-                        } else {
-                          setValidationErrors(prev => ({ ...prev, imageBefore: undefined }));
-                        }
-                      }}
-                    />
-                  </FormControl>
-                  <FormDescription className="text-xs">
-                    Pega el link de la imagen ya subida a Drive
-                  </FormDescription>
-                  {validationErrors.imageBefore && (
-                    <p className="text-xs text-orange-600 mt-1">{validationErrors.imageBefore}</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Imagen Antes */}
+                <FormField
+                  control={form.control}
+                  name="imageBeforeUrl"
+                  render={({ field }) => (
+                    <FormItem className="space-y-2">
+                      <FormLabel className="text-xs font-semibold text-slate-700">Fotos del Antes</FormLabel>
+                      <FormControl>
+                        <MultiFileUploader
+                          value={field.value || ""}
+                          onChange={field.onChange}
+                          accept="image/*"
+                          label="Fotos Antes"
+                          isImageOnly={true}
+                          maxFiles={5}
+                          showCamera={true}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
                   )}
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                />
 
-            {/* Link Imagen Después */}
-            <FormField
-              control={form.control}
-              name="imageAfterUrl"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="flex items-center gap-2">
-                    <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                    Link de Drive - Imagen Después
-                  </FormLabel>
-                  <FormControl>
-                    <Input
-                      placeholder="https://drive.google.com/file/d/..."
-                      {...field}
-                      className={validationErrors.imageAfter ? "border-orange-400 focus-visible:ring-orange-400" : ""}
-                      onChange={(e) => {
-                        field.onChange(e);
-                        const value = e.target.value;
-                        if (value && !isUrlFromFolder(value, zonaInfo?.imagenesFolderUrl || equipoInfo?.imagenesFolderUrl)) {
-                          setValidationErrors(prev => ({ ...prev, imageAfter: "⚠️ Este link no parece ser de la carpeta configurada" }));
-                        } else {
-                          setValidationErrors(prev => ({ ...prev, imageAfter: undefined }));
-                        }
-                      }}
-                    />
-                  </FormControl>
-                  <FormDescription className="text-xs">
-                    Pega el link de la imagen ya subida a Drive
-                  </FormDescription>
-                  {validationErrors.imageAfter && (
-                    <p className="text-xs text-orange-600 mt-1">{validationErrors.imageAfter}</p>
+                {/* Imagen Después */}
+                <FormField
+                  control={form.control}
+                  name="imageAfterUrl"
+                  render={({ field }) => (
+                    <FormItem className="space-y-2">
+                      <FormLabel className="text-xs font-semibold text-slate-700">Fotos del Después</FormLabel>
+                      <FormControl>
+                        <MultiFileUploader
+                          value={field.value || ""}
+                          onChange={field.onChange}
+                          accept="image/*"
+                          label="Fotos Después"
+                          isImageOnly={true}
+                          maxFiles={5}
+                          showCamera={true}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
                   )}
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
-        </div>
+                />
+              </div>
+            </div>
 
-        {/* Sección de Anexos */}
-        <div className="space-y-4 pt-4 border-t">
-          <h3 className="text-sm font-medium flex items-center gap-2">
-            <FileText className="h-4 w-4" />
-            Adjuntar Archivo (Anexo)
-          </h3>
+            {/* Sección de Anexos */}
+            <div className="space-y-3 pt-4 border-t">
+              <h3 className="text-sm font-semibold flex items-center gap-2 text-slate-800">
+                <FileText className="h-4 w-4 text-primary" />
+                Archivos Adjuntos (Anexos)
+              </h3>
 
-          {/* Estado de la carpeta de anexos - Zona o Equipo */}
-          {loadingEquipo || loadingZona ? (
-            <Alert className="bg-gray-50 border-gray-200">
-              <AlertDescription className="text-sm">Cargando información de carpetas...</AlertDescription>
-            </Alert>
-          ) : zonaInfo?.attachmentsUrl ? (
-            <Alert className="bg-blue-50 border-blue-200">
-              <Folder className="h-4 w-4 text-blue-600" />
-              <AlertDescription className="text-sm text-blue-800">
-                <strong>Carpeta de anexos de la zona configurada:</strong>
-                <a
-                  href={zonaInfo.attachmentsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 ml-2 text-blue-700 hover:underline"
-                >
-                  Abrir carpeta <ExternalLink className="h-3 w-3" />
-                </a>
-              </AlertDescription>
-            </Alert>
-          ) : equipoInfo?.attachmentsUrl ? (
-            <Alert className="bg-blue-50 border-blue-200">
-              <Folder className="h-4 w-4 text-blue-600" />
-              <AlertDescription className="text-sm text-blue-800">
-                <strong>Carpeta de anexos del equipo configurada:</strong>
-                <a
-                  href={equipoInfo.attachmentsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 ml-2 text-blue-700 hover:underline"
-                >
-                  Abrir carpeta <ExternalLink className="h-3 w-3" />
-                </a>
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <Alert variant="default" className="bg-yellow-50 border-yellow-200">
-              <AlertCircle className="h-4 w-4 text-yellow-600" />
-              <AlertDescription className="text-sm text-yellow-800">
-                <strong>Sin carpeta de anexos:</strong> Sube el archivo a cualquier carpeta de Drive y pega el link aquí.
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <FormField
-            control={form.control}
-            name="anexoUrl"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel className="flex items-center gap-2">
-                  <Link className="h-4 w-4 text-muted-foreground" />
-                  Link de Drive - Archivo Anexo
-                </FormLabel>
-                <FormControl>
-                  <Input
-                    placeholder="https://drive.google.com/file/d/..."
-                    {...field}
-                    className={validationErrors.anexo ? "border-orange-400 focus-visible:ring-orange-400" : ""}
-                    onChange={(e) => {
-                      field.onChange(e);
-                      const value = e.target.value;
-                      if (value && !isUrlFromFolder(value, zonaInfo?.attachmentsUrl || equipoInfo?.attachmentsUrl)) {
-                        setValidationErrors(prev => ({ ...prev, anexo: "⚠️ Este link no parece ser de la carpeta configurada" }));
-                      } else {
-                        setValidationErrors(prev => ({ ...prev, anexo: undefined }));
-                      }
-                    }}
-                  />
-                </FormControl>
-                <FormDescription className="text-xs">
-                  Pega el link del archivo (PDF, Word, Excel, etc.) ya subido a Drive
-                </FormDescription>
-                {validationErrors.anexo && (
-                  <p className="text-xs text-orange-600 mt-1">{validationErrors.anexo}</p>
+              <FormField
+                control={form.control}
+                name="anexoUrl"
+                render={({ field }) => (
+                  <FormItem className="space-y-2">
+                    <FormControl>
+                      <MultiFileUploader
+                        value={field.value || ""}
+                        onChange={field.onChange}
+                        accept="*/*"
+                        label="Archivos Anexos"
+                        isImageOnly={false}
+                        maxFiles={5}
+                        showCamera={false}
+                        maxSizeMB={null}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
                 )}
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
+              />
+            </div>
 
         <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? "Guardando..." : "Guardar Orden"}

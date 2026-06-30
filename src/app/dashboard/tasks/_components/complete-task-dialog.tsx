@@ -32,6 +32,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import type { Task, User } from "@/lib/types"
 import { useToast } from "@/hooks/use-toast"
 import { useFormPersistence } from "@/hooks/use-form-persistence"
+import { MultiFileUploader } from "@/components/multi-file-uploader"
 
 const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
@@ -45,9 +46,9 @@ const completeSchema = z
     repuestos: z.string().optional().default(""),
     observaciones: z.string().optional().default(""),
     executionDate: z.date({ required_error: "Selecciona la fecha de ejecución." }),
-    imageBeforeUrl: z.string().url().optional().or(z.literal("")),
-    imageAfterUrl: z.string().url().optional().or(z.literal("")),
-    anexoUrl: z.string().url().optional().or(z.literal("")),
+    imageBeforeUrl: z.string().optional().default(""),
+    imageAfterUrl: z.string().optional().default(""),
+    anexoUrl: z.string().optional().default(""),
   })
   .refine(
     (data) => (
@@ -380,146 +381,85 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
             />
 
             {/* Sección de Imágenes */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium flex items-center gap-2">
-                <FolderOpen className="h-4 w-4" />
-                Imágenes de Evidencia (Antes/Después)
+            <div className="space-y-4 pt-4 border-t">
+              <h3 className="text-sm font-semibold flex items-center gap-2 text-slate-800">
+                <FolderOpen className="h-4 w-4 text-primary" />
+                Evidencia Fotográfica
               </h3>
 
-              {/* Estado de la carpeta de imágenes del equipo */}
-              {loadingEquipo ? (
-                <Alert className="bg-gray-50 border-gray-200">
-                  <AlertDescription className="text-sm">Cargando información del equipo...</AlertDescription>
-                </Alert>
-              ) : equipoInfo?.imagenesFolderUrl ? (
-                <Alert className="bg-green-50 border-green-200">
-                  <FolderOpen className="h-4 w-4 text-green-600" />
-                  <AlertDescription className="text-sm text-green-800">
-                    <strong>Carpeta de imágenes configurada:</strong>
-                    <a
-                      href={equipoInfo.imagenesFolderUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 ml-2 text-green-700 hover:underline"
-                    >
-                      Abrir carpeta <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <Alert variant="default" className="bg-yellow-50 border-yellow-200">
-                  <AlertCircle className="h-4 w-4 text-yellow-600" />
-                  <AlertDescription className="text-sm text-yellow-800">
-                    <strong>Sin carpeta configurada:</strong> Sube las imágenes a cualquier carpeta de Drive y pega los links aquí.
-                  </AlertDescription>
-                </Alert>
-              )}
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Imagen Antes */}
+                <FormField
+                  control={form.control}
+                  name="imageBeforeUrl"
+                  render={({ field }) => (
+                    <FormItem className="space-y-2">
+                      <FormLabel className="text-xs font-semibold text-slate-700">Fotos del Antes</FormLabel>
+                      <FormControl>
+                        <MultiFileUploader
+                          value={field.value || ""}
+                          onChange={field.onChange}
+                          accept="image/*"
+                          label="Fotos Antes"
+                          isImageOnly={true}
+                          maxFiles={5}
+                          showCamera={true}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Link Imagen Antes */}
-              <FormField
-                control={form.control}
-                name="imageBeforeUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center gap-2">
-                      <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                      Link de Drive - Imagen Antes
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="https://drive.google.com/file/d/..."
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormDescription className="text-xs">
-                      Pega el link de la imagen ya subida a Drive
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {/* Link Imagen Después */}
-              <FormField
-                control={form.control}
-                name="imageAfterUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center gap-2">
-                      <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                      Link de Drive - Imagen Después
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="https://drive.google.com/file/d/..."
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormDescription className="text-xs">
-                      Pega el link de la imagen ya subida a Drive
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                {/* Imagen Después */}
+                <FormField
+                  control={form.control}
+                  name="imageAfterUrl"
+                  render={({ field }) => (
+                    <FormItem className="space-y-2">
+                      <FormLabel className="text-xs font-semibold text-slate-700">Fotos del Después</FormLabel>
+                      <FormControl>
+                        <MultiFileUploader
+                          value={field.value || ""}
+                          onChange={field.onChange}
+                          accept="image/*"
+                          label="Fotos Después"
+                          isImageOnly={true}
+                          maxFiles={5}
+                          showCamera={true}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
             </div>
 
             {/* Sección de Anexos */}
             <div className="space-y-3 pt-4 border-t">
-              <h3 className="text-sm font-medium flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                Adjuntar Archivo (Anexo)
+              <h3 className="text-sm font-semibold flex items-center gap-2 text-slate-800">
+                <FileText className="h-4 w-4 text-primary" />
+                Archivos Adjuntos (Anexos)
               </h3>
-
-              {/* Estado de la carpeta de anexos del equipo */}
-              {loadingEquipo ? (
-                <Alert className="bg-gray-50 border-gray-200">
-                  <AlertDescription className="text-sm">Cargando información del equipo...</AlertDescription>
-                </Alert>
-              ) : equipoInfo?.attachmentsUrl ? (
-                <Alert className="bg-blue-50 border-blue-200">
-                  <Folder className="h-4 w-4 text-blue-600" />
-                  <AlertDescription className="text-sm text-blue-800">
-                    <strong>Carpeta de anexos configurada:</strong>
-                    <a
-                      href={equipoInfo.attachmentsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 ml-2 text-blue-700 hover:underline"
-                    >
-                      Abrir carpeta <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <Alert variant="default" className="bg-yellow-50 border-yellow-200">
-                  <AlertCircle className="h-4 w-4 text-yellow-600" />
-                  <AlertDescription className="text-sm text-yellow-800">
-                    <strong>Sin carpeta de anexos:</strong> Sube el archivo a cualquier carpeta de Drive y pega el link aquí.
-                  </AlertDescription>
-                </Alert>
-              )}
 
               <FormField
                 control={form.control}
                 name="anexoUrl"
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center gap-2">
-                      <Link className="h-4 w-4 text-muted-foreground" />
-                      Link de Drive - Archivo Anexo
-                    </FormLabel>
+                  <FormItem className="space-y-2">
                     <FormControl>
-                      <Input
-                        placeholder="https://drive.google.com/file/d/..."
-                        {...field}
+                      <MultiFileUploader
+                        value={field.value || ""}
+                        onChange={field.onChange}
+                        accept="*/*"
+                        label="Archivos Anexos"
+                        isImageOnly={false}
+                        maxFiles={5}
+                        showCamera={false}
+                        maxSizeMB={null}
                       />
                     </FormControl>
-                    <FormDescription className="text-xs">
-                      Pega el link del archivo (PDF, Word, Excel, etc.) ya subido a Drive
-                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

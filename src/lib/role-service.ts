@@ -1,6 +1,6 @@
 import { User } from 'firebase/auth';
 
-export type AppRole = 'JEFE' | 'TECNICO' | 'NONE';
+export type AppRole = 'JEFE' | 'TECNICO' | 'INVITADO' | 'NONE';
 
 export interface UserRole {
   isAdmin: boolean;
@@ -33,10 +33,20 @@ export async function checkUserRole(user: User | null): Promise<UserRole> {
     if (response.ok) {
       const data = await response.json();
       // Aseguramos que la respuesta tenga la estructura correcta
+      let permissions: string[];
+      if (data.role === 'JEFE') {
+        permissions = ['read', 'write', 'delete', 'admin'];
+      } else if (data.role === 'TECNICO') {
+        permissions = ['read', 'write'];
+      } else if (data.role === 'INVITADO') {
+        permissions = ['read'];
+      } else {
+        permissions = [];
+      }
       return {
         isAdmin: data.role === 'JEFE',
         role: data.role || 'NONE',
-        permissions: data.role === 'JEFE' ? ['read', 'write', 'delete', 'admin'] : ['read', 'write']
+        permissions
       };
     } else {
       // Fallback: verificación basada en variables de entorno
@@ -64,9 +74,12 @@ function getFallbackRole(email: string | null): UserRole {
   const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',')?.map(e => e.trim().toLowerCase()) || [];
   
   const techEmails = process.env.TECNICO_EMAILS?.split(',')?.map(e => e.trim().toLowerCase()) || [];
+  
+  const invitadoEmails = process.env.INVITADO_EMAILS?.split(',')?.map(e => e.trim().toLowerCase()) || [];
 
   const isJefe = adminEmails.includes(cleanEmail);
   const isTecnico = techEmails.includes(cleanEmail);
+  const isInvitado = invitadoEmails.includes(cleanEmail);
 
   if (isJefe) {
     return { isAdmin: true, role: 'JEFE', permissions: ['read', 'write', 'delete', 'admin'] };
@@ -74,6 +87,10 @@ function getFallbackRole(email: string | null): UserRole {
   
   if (isTecnico) {
     return { isAdmin: false, role: 'TECNICO', permissions: ['read', 'write'] };
+  }
+  
+  if (isInvitado) {
+    return { isAdmin: false, role: 'INVITADO', permissions: ['read'] };
   }
   
   // Si no está en ninguna lista, no tiene acceso

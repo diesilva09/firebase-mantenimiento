@@ -1,12 +1,14 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useEffect } from "react"
 import { useParams } from "next/navigation"
 import { forms } from "@/lib/data"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
+import { useUserRole } from "@/context/user-role-context"
+import { useRouter } from "next/navigation"
 
 // Import all form components
 import { EquipmentInspectionForm } from "../_components/equipment-inspection-form"
@@ -16,6 +18,7 @@ import { ConsumptionForm } from "../_components/consumption-form"
 import { SparesRequestForm } from "../_components/spares-request-form"
  
 import { MaintenanceMinuteForm } from "../_components/maintenance-minute-form"
+import { SolicitudesMantenimientoForm } from "../_components/solicitudes-mantenimiento-form"
 
 const formComponents = {
   "inspeccion-equipos": EquipmentInspectionForm,
@@ -24,14 +27,33 @@ const formComponents = {
   "consumo-diario": ConsumptionForm,
   "solicitud-repuestos": SparesRequestForm,
   "minuta-mtto": MaintenanceMinuteForm,
+  "solicitudes-mantenimiento": SolicitudesMantenimientoForm,
 }
 
 export default function DynamicFormPage() {
   const params = useParams()
   const slug = params.slug as keyof typeof formComponents
+  const router = useRouter()
+  const { userRole, roleLoading } = useUserRole()
+
+  // Redirigir si es INVITADO y no está en el formulario correcto
+  useEffect(() => {
+    if (!roleLoading && userRole?.role === 'INVITADO' && slug !== 'solicitudes-mantenimiento') {
+      router.replace('/dashboard/forms/solicitudes-mantenimiento')
+    }
+  }, [userRole?.role, slug, roleLoading, router])
 
   const formInfo = useMemo(() => forms.find((f) => f.slug === slug), [slug])
   const FormComponent = formComponents[slug]
+
+  // Mientras carga el rol, mostrar pantalla de espera
+  if (roleLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">Verificando sesión...</p>
+      </div>
+    )
+  }
 
   if (!formInfo || !FormComponent) {
     return (

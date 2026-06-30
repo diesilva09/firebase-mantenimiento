@@ -67,8 +67,6 @@ export function ConsumptionForm() {
       observaciones: 'Registro diario consolidado de servicios'
     };
 
-    console.log('Enviando consumo consolidado a la BD:', consumoData);
-
     // Guardar en la base de datos
     const response = await fetch('/api/consumos-servicios', {
       method: 'POST',
@@ -86,8 +84,9 @@ export function ConsumptionForm() {
     const nuevoConsumo = await response.json();
 
     toast({
-      title: "✅ Consumo Guardado en BD",
-      description: `Registro diario de servicios guardado exitosamente`,
+      title: "Consumo guardado exitosamente",
+      description: `Registro diario de servicios guardado correctamente.`,
+      variant: "success",
     });
     
     form.reset();
@@ -95,7 +94,7 @@ export function ConsumptionForm() {
   } catch (error) {
     console.error('Error guardando consumo:', error);
     toast({
-      title: "❌ Error",
+      title: "Error al guardar el consumo",
       description: error instanceof Error ? error.message : "No se pudo guardar el consumo",
       variant: "destructive",
     });

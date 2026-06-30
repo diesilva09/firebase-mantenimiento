@@ -1,105 +1,69 @@
-// Service worker para notificaciones personalizadas
+self.addEventListener("install", (event) => {
+  event.waitUntil(self.skipWaiting())
+})
 
-// Instalación del service worker
-self.addEventListener('install', (event) => {
-  console.log('Service worker instalado');
-  event.waitUntil(self.skipWaiting()); // Forzar que el service worker tome control inmediatamente
-});
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim())
+})
 
-// Activación del service worker
-self.addEventListener('activate', (event) => {
-  console.log('Service worker activado');
-  event.waitUntil(self.clients.claim()); // Tomar control de todas las páginas
-});
+self.addEventListener("push", (event) => {
+  let payload = {}
 
-// Escuchar mensajes push
-self.addEventListener('push', (event) => {
-  let payload = {};
-  
   if (event.data) {
     try {
-      payload = event.data.json();
-    } catch (e) {
-      payload = { title: 'Notificación', body: event.data.text() };
+      payload = event.data.json()
+    } catch (error) {
+      payload = { title: "Notificacion", body: event.data.text() }
     }
   } else {
-    payload = { title: 'Nueva notificación', body: 'Tienes una nueva notificación' };
+    payload = { title: "Nueva notificacion", body: "Tienes una nueva notificacion" }
   }
 
-  const title = payload.title || 'Nueva notificación';
+  const title = payload.title || "Nueva notificacion"
   const options = {
-    body: payload.body || 'Tienes una nueva notificación',
-    icon: payload.icon || '/la-coruna.jpg',
-    badge: payload.badge || '/la-coruna.jpg',
+    body: payload.body || "Tienes una nueva notificacion",
+    icon: payload.icon || "/logo.png",
+    badge: payload.badge || "/logo.png",
+    tag: payload.tag || title,
     data: payload.data || {},
-    actions: payload.actions || []
-  };
+    actions: payload.actions || [],
+  }
 
   event.waitUntil(
-    self.registration.showNotification(title, options)
-  );
-});
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      clientList.forEach((client) => {
+        client.postMessage({
+          type: "PUSH_NOTIFICATION_RECEIVED",
+          payload,
+        })
+      })
 
-// Escuchar clics en notificaciones
-self.addEventListener('notificationclick', (event) => {
-  console.log('Notificación clickeada', event);
+      return self.registration.showNotification(title, options)
+    }),
+  )
+})
 
-  // Cerrar la notificación
-  event.notification.close();
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close()
 
-  // Determinar la URL a abrir basada en el tipo de notificación y datos
-  let urlToOpen = '/';
+  const targetUrl = new URL(event.notification.data?.url || "/dashboard", self.location.origin).href
 
-  if (event.notification.data) {
-    const notificationData = event.notification.data;
-
-    // Manejar diferentes tipos de notificaciones
-    if (notificationData.type) {
-      switch (notificationData.type) {
-        case 'task_alert':
-        case 'task_created':
-        case 'task_completed':
-        case 'task_upcoming':
-          // Para notificaciones de tareas, redirigir a la página específica de la tarea
-          urlToOpen = notificationData.url || `/dashboard/tasks/${notificationData.taskId || ''}`;
-          break;
-
-        case 'spare_request':
-        case 'spare_request_approved':
-        case 'spare_request_rejected':
-          // Para notificaciones de solicitudes de repuestos
-          urlToOpen = notificationData.url || `/dashboard/solicitudes/${notificationData.requestId || ''}`;
-          break;
-
-        case 'maintenance_reminder':
-          // Para recordatorios de mantenimiento
-          urlToOpen = notificationData.url || `/dashboard/mantenimientos/${notificationData.maintenanceId || ''}`;
-          break;
-
-        default:
-          // Para otros tipos de notificaciones, usar la URL proporcionada o ir al dashboard
-          urlToOpen = notificationData.url || '/dashboard';
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) {
+          client.navigate(targetUrl)
+          return client.focus()
+        }
       }
-    } else {
-      // Si no hay tipo definido, usar la URL proporcionada o ir al dashboard
-      urlToOpen = notificationData.url || '/dashboard';
-    }
-  } else {
-    // Si no hay datos, ir al dashboard por defecto
-    urlToOpen = '/dashboard';
-  }
 
-  event.waitUntil(
-    clients.openWindow(urlToOpen)
-  );
-});
+      return clients.openWindow(targetUrl)
+    }),
+  )
+})
 
-// Escuchar mensajes del cliente
-self.addEventListener('message', (event) => {
-  console.log('Mensaje recibido del cliente:', event.data);
-  
-  // Puedes manejar mensajes del cliente aquí si es necesario
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting()
   }
-});
+})

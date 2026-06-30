@@ -7,6 +7,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useRouter, usePathname } from "next/navigation"
 import { logOut } from "@/firebase/auth/auth-service"
 import { useDashboardSearch } from "@/context/dashboard-search-context"
+import { useUserRole } from "@/context/user-role-context"
 
 export function DashboardHeader() {
   const router = useRouter()
@@ -14,6 +15,7 @@ export function DashboardHeader() {
   const { query, setQuery, suggestions, /* highlightedSuggestionId, */ setHighlightedSuggestionId } = useDashboardSearch()
   const [hoveredSuggestionId, setHoveredSuggestionId] = useState<string | null>(null)
   const [selectedIndex, setSelectedIndex] = useState<number>(-1)
+  const { userRole } = useUserRole()
 
   const [showSuggestions, setShowSuggestions] = useState(false)
 
@@ -168,7 +170,7 @@ export function DashboardHeader() {
         </form>
       </div>
 
-      <NotificationBadge />
+      {userRole?.role !== 'INVITADO' && <NotificationBadge />}
       <Button
         variant="secondary"
         size="icon"

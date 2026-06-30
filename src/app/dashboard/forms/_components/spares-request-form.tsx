@@ -90,8 +90,9 @@ export function SparesRequestForm() {
 
       if (result.success) {
         toast({
-          title: "✅ Solicitud Creada",
-          description: "La solicitud de repuestos ha sido enviada y guardada.",
+          title: "Solicitud de repuestos creada exitosamente",
+          description: "La solicitud de repuestos ha sido enviada y guardada correctamente.",
+          variant: "success",
         })
         form.reset()
         setMaquinaQuery("") // Limpiar el campo de búsqueda de máquina
@@ -102,7 +103,7 @@ export function SparesRequestForm() {
     } catch (error: any) {
       console.error('Error:', error)
       toast({
-        title: "❌ Error",
+        title: "Error al guardar la solicitud",
         description: error.message || "No se pudo guardar la solicitud.",
         variant: "destructive",
       })

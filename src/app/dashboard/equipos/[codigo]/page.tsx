@@ -1,12 +1,12 @@
 "use client"
 
-import React, { useMemo, useEffect, useState } from "react"
-import Link from "next/link"
+import React, { useMemo, useEffect, useState, useCallback } from "react"
 import { useParams, useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { MultiFileUploader } from "@/components/multi-file-uploader"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,11 +14,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { formatPrice } from '@/lib/utils'
-import { ArrowLeft, Folder, Eye, Download, FileSpreadsheet, FileText, File, PieChart as PieChartIcon, Image as ImageIcon, ExternalLink, Trash2, X } from "lucide-react"
+import { ArrowLeft, Folder, Eye, Download, FileSpreadsheet, FileText, File, PieChart as PieChartIcon, Trash2 } from "lucide-react"
+import { MultiFileSection, MultiFileViewer } from "@/components/multi-file-viewer"
 import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
 import { useUser } from '@/firebase/auth/use-user'
 import { checkUserRole, UserRole } from '@/lib/role-service'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts"
+import { emitLiveUpdate, useLiveRefresh } from "@/hooks/use-live-refresh"
+import { useToast } from "@/hooks/use-toast"
+import { getDisplayFileName, getStoredFileId } from "@/lib/file-display"
 
 interface HojaVidaRow {
   id: number
@@ -31,6 +35,8 @@ interface HojaVidaRow {
   imagenAntesUrl?: string | null
   imagenDespuesUrl?: string | null
   anexoUrl?: string | null
+  esSolicitada?: boolean
+  solicitudId?: number | null
 }
 
 interface ParadaRow {
@@ -42,58 +48,132 @@ interface ParadaRow {
   tecnico: string
 }
 
+interface EquipmentApiRow {
+  id: number
+  codigo: string
+  version?: string | null
+  nombre: string
+  area?: string | null
+  linea?: string | null
+  marca?: string | null
+  modelo?: string | null
+  fabricante?: string | null
+  fecha_implementacion?: string | null
+  fecha_adquisicion?: string | null
+  capacidad?: string | null
+  amperaje?: string | null
+  potencia?: string | null
+  voltaje?: string | null
+  rpm?: string | null
+  magnitud_medida?: string | null
+  estado?: string | null
+  imagen_url?: string | null
+  attachments_url?: string | null
+  imagenes_folder_url?: string | null
+}
+
+function parseAttachmentUrls(value: string | null | undefined) {
+  if (!value) return []
+
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function isGoogleDriveFolderUrl(url: string) {
+  return url.includes("drive.google.com/drive/folders/")
+}
+
+function buildAttachmentValue(urls: string[]) {
+  return Array.from(new Set(urls.map((url) => url.trim()).filter(Boolean))).join(",")
+}
+
+function updateEquipmentAttachmentsInLocalCache(codigo: string, attachmentsUrl: string) {
+  if (typeof window === "undefined") return
+
+  try {
+    const raw = localStorage.getItem("equipos")
+    if (!raw) return
+
+    const all = JSON.parse(raw) as Array<Record<string, unknown>>
+    const updated = all.map((equipment) =>
+      equipment && equipment.codigo === codigo
+        ? {
+            ...equipment,
+            attachmentsUrl,
+          }
+        : equipment
+    )
+
+    localStorage.setItem("equipos", JSON.stringify(updated))
+  } catch {
+    // Si falla el cache local, la fuente principal sigue siendo la API.
+  }
+}
+
 export default function EquipoDetallePage() {
   const router = useRouter()
   const params = useParams()
   const codigo = params.codigo as string
   const searchParams = useSearchParams()
   const view = (searchParams.get("view") || "hoja-vida") as "hoja-vida" | "paradas" | "repuestos" | "anexos"
+  const { toast } = useToast()
 
   const [attachmentsUrl, setAttachmentsUrl] = useState<string>("")
+  const [equipmentRecord, setEquipmentRecord] = useState<EquipmentApiRow | null>(null)
   const [loadingAttachments, setLoadingAttachments] = useState<boolean>(true)
+  const [savingAttachments, setSavingAttachments] = useState(false)
+  const [deletingAttachmentUrl, setDeletingAttachmentUrl] = useState<string | null>(null)
+  const [attachmentSearch, setAttachmentSearch] = useState("")
+  const [attachmentFileNames, setAttachmentFileNames] = useState<Record<string, string>>({})
   const [showStats, setShowStats] = useState(false)
 
-  useEffect(() => {
+  const loadAttachmentsUrl = useCallback(async (options?: { silent?: boolean }) => {
     if (typeof window === "undefined") return
 
-    const loadAttachmentsUrl = async () => {
+    if (!options?.silent) {
       setLoadingAttachments(true)
-      try {
-        // 1) Intentar leer desde localStorage (sinpegar siempre a la API)
-        try {
-          const raw = localStorage.getItem("equipos")
-          if (raw) {
-            const all = JSON.parse(raw) as any[]
-            const eq = all.find((e) => e && e.codigo === codigo)
-            if (eq?.attachmentsUrl) {
-              setAttachmentsUrl(eq.attachmentsUrl as string)
-              return
-            }
-          }
-        } catch (e) {
-          console.warn("No se pudo leer equipos desde localStorage para anexos", e)
-        }
+    }
 
-        // 2) Si no se encontró nada en localStorage, intentar leer directamente desde la API
-        try {
-          const res = await fetch("/api/equipos")
-          if (!res.ok) return
-          const json = await res.json()
-          const data: any[] = Array.isArray(json?.data) ? json.data : []
-          const row = data.find((r) => r && r.codigo === codigo)
-          if (row?.attachments_url) {
-            setAttachmentsUrl(row.attachments_url as string)
+    try {
+      let cachedAttachments = ""
+
+      try {
+        const raw = localStorage.getItem("equipos")
+        if (raw) {
+          const all = JSON.parse(raw) as any[]
+          const eq = all.find((e) => e && e.codigo === codigo)
+          if (eq?.attachmentsUrl) {
+            cachedAttachments = eq.attachmentsUrl as string
+            setAttachmentsUrl(cachedAttachments)
           }
-        } catch (e) {
-          console.warn("No se pudo cargar attachments_url desde /api/equipos", e)
         }
-      } finally {
+      } catch (e) {
+        console.warn("No se pudo leer equipos desde localStorage para anexos", e)
+      }
+
+      try {
+        const res = await fetch("/api/equipos")
+        if (!res.ok) return
+        const json = await res.json()
+        const data: EquipmentApiRow[] = Array.isArray(json?.data) ? json.data : []
+        const row = data.find((r) => r && r.codigo === codigo)
+        setEquipmentRecord(row ?? null)
+        setAttachmentsUrl(row?.attachments_url ?? cachedAttachments)
+      } catch (e) {
+        console.warn("No se pudo cargar attachments_url desde /api/equipos", e)
+      }
+    } finally {
+      if (!options?.silent) {
         setLoadingAttachments(false)
       }
     }
-
-    loadAttachmentsUrl()
   }, [codigo])
+
+  useEffect(() => {
+    void loadAttachmentsUrl()
+  }, [loadAttachmentsUrl])
 
  const [hojaVida, setHojaVida] = useState<HojaVidaRow[]>([])
 const [loadingHojaVida, setLoadingHojaVida] = useState(false)
@@ -114,7 +194,6 @@ useEffect(() => {
   const loadUserRole = async () => {
     if (currentUser) {
       const role = await checkUserRole(currentUser)
-      console.log('User role loaded:', role) // Debug
       setUserRole(role)
     }
   }
@@ -122,7 +201,6 @@ useEffect(() => {
 }, [currentUser])
 
 const isJefe = userRole?.role === 'JEFE'
-console.log('isJefe:', isJefe, 'role:', userRole?.role) // Debug
 
 // Función para abrir diálogo de confirmación
 const openDeleteDialog = (id: number) => {
@@ -150,6 +228,7 @@ const confirmDelete = async () => {
       setHojaVida(prev => prev.filter(row => row.id !== deleteTargetId))
       setDeleteDialogOpen(false)
       setDeleteTargetId(null)
+      emitLiveUpdate(["equipment-history"])
     } else {
       console.error('Error eliminando registro')
     }
@@ -160,78 +239,314 @@ const confirmDelete = async () => {
   }
 }
 
-useEffect(() => {
+const fetchHojaVida = useCallback(async (options?: { silent?: boolean }) => {
   const abortController = new AbortController()
-
-  const fetchHojaVida = async () => {
-    try {
+  try {
+    if (!options?.silent) {
       setLoadingHojaVida(true)
-      console.log('Buscando hoja de vida para equipo:', codigo, '| encodeURIComponent:', encodeURIComponent(codigo));
-      const res = await fetch(
-        `/api/equipos/historial?codigoEquipo=${encodeURIComponent(codigo)}`,
-        { signal: abortController.signal }
-      )
-      if (!res.ok) {
-        console.warn("Error cargando hoja de vida desde equipos_historial")
-        if (!abortController.signal.aborted) setHojaVida([])
-        return
-      }
+    }
 
-      const json = await res.json()
-      const data: any[] = Array.isArray(json?.data) ? json.data : []
-      console.log('Registros recibidos de equipos_historial:', data.length, 'para código:', codigo);
+    const res = await fetch(
+      `/api/equipos/historial?codigoEquipo=${encodeURIComponent(codigo)}`,
+      { signal: abortController.signal }
+    )
+    if (!res.ok) {
+      console.warn("Error cargando hoja de vida desde equipos_historial")
+      if (!abortController.signal.aborted) setHojaVida([])
+      return
+    }
 
-      const mapped: HojaVidaRow[] = data.map((r) => ({
-        id: r.id,
-        fecha:
-          typeof r.fecha_evento === "string"
-            ? r.fecha_evento.slice(0, 10) // yyyy-mm-dd
-            : "",
-        descripcion: r.labor ?? "",
-        responsable: r.ejecutado_por ?? "",
-        repuestos: r.repuestos_usados ?? "",
-        tipo: r.tipo_mantenimiento ?? "",
-        observaciones: r.observaciones ?? "",
-        imagenAntesUrl: r.imagen_antes_url ?? null,
-        imagenDespuesUrl: r.imagen_despues_url ?? null,
-        anexoUrl: r.anexo_url ?? null,
-      }))
+    const json = await res.json()
+    const data: any[] = Array.isArray(json?.data) ? json.data : []
 
-      // Deduplicar por contenido (fecha + descripcion + responsable) para evitar registros duplicados
-      // Si hay duplicados, conservar el que tenga los links completos
-      const uniqueByContent = new Map<string, HojaVidaRow>()
-      for (const item of mapped) {
-        const key = `${item.fecha}|${item.descripcion}|${item.responsable}`
-        const existing = uniqueByContent.get(key)
-        if (!existing) {
+    const mapped: HojaVidaRow[] = data.map((r) => ({
+      id: r.id,
+      fecha:
+        typeof r.fecha_evento === "string"
+          ? r.fecha_evento.slice(0, 10)
+          : "",
+      descripcion: r.labor ?? "",
+      responsable: r.ejecutado_por ?? "",
+      repuestos: r.repuestos_usados ?? "",
+      tipo: r.tipo_mantenimiento ?? "",
+      observaciones: r.observaciones ?? "",
+      imagenAntesUrl: r.imagen_antes_url ?? null,
+      imagenDespuesUrl: r.imagen_despues_url ?? null,
+      anexoUrl: r.anexo_url ?? null,
+      esSolicitada: Boolean(r.es_solicitada),
+      solicitudId: r.solicitud_id ?? null,
+    }))
+
+    const uniqueByContent = new Map<string, HojaVidaRow>()
+    for (const item of mapped) {
+      const key = `${item.fecha}|${item.descripcion}|${item.responsable}`
+      const existing = uniqueByContent.get(key)
+      if (!existing) {
+        uniqueByContent.set(key, item)
+      } else {
+        const existingHasLinks = existing.imagenAntesUrl || existing.imagenDespuesUrl || existing.anexoUrl
+        const newHasLinks = item.imagenAntesUrl || item.imagenDespuesUrl || item.anexoUrl
+        if (!existingHasLinks && newHasLinks) {
           uniqueByContent.set(key, item)
-        } else {
-          // Si ya existe, quedarnos con el que tenga más datos (links)
-          const existingHasLinks = existing.imagenAntesUrl || existing.imagenDespuesUrl || existing.anexoUrl
-          const newHasLinks = item.imagenAntesUrl || item.imagenDespuesUrl || item.anexoUrl
-          if (!existingHasLinks && newHasLinks) {
-            uniqueByContent.set(key, item)
-          }
         }
       }
-      const deduplicated = Array.from(uniqueByContent.values())
+    }
+    const deduplicated = Array.from(uniqueByContent.values())
 
-      if (!abortController.signal.aborted) setHojaVida(deduplicated)
-    } catch (e) {
-      if ((e as Error).name === 'AbortError') return
-      console.warn("No se pudo cargar equipos_historial", e)
-      if (!abortController.signal.aborted) setHojaVida([])
-    } finally {
-      if (!abortController.signal.aborted) setLoadingHojaVida(false)
+    if (!abortController.signal.aborted) setHojaVida(deduplicated)
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') return
+    console.warn("No se pudo cargar equipos_historial", e)
+    if (!abortController.signal.aborted) setHojaVida([])
+  } finally {
+    if (!abortController.signal.aborted && !options?.silent) {
+      setLoadingHojaVida(false)
     }
   }
-
-  fetchHojaVida()
 
   return () => {
     abortController.abort()
   }
 }, [codigo])
+
+useEffect(() => {
+  const abortPromise = fetchHojaVida()
+
+  return () => {
+    void abortPromise.then((cleanup) => cleanup?.())
+  }
+}, [fetchHojaVida])
+
+useLiveRefresh({
+  callback: async () => {
+    await Promise.all([
+      fetchHojaVida({ silent: true }),
+      loadAttachmentsUrl({ silent: true }),
+    ])
+  },
+  scopes: ["equipment-history", "equipos", "maintenance-orders", "tasks"],
+  intervalMs: 20000,
+  enabled: Boolean(codigo),
+  immediate: false,
+})
+
+  const attachmentEntries = useMemo(() => parseAttachmentUrls(attachmentsUrl), [attachmentsUrl])
+  const legacyDriveFolders = useMemo(
+    () => attachmentEntries.filter((url) => isGoogleDriveFolderUrl(url)),
+    [attachmentEntries]
+  )
+  const storedAttachmentFiles = useMemo(
+    () => attachmentEntries.filter((url) => !isGoogleDriveFolderUrl(url)),
+    [attachmentEntries]
+  )
+  const normalizedAttachmentSearch = attachmentSearch.trim().toLowerCase()
+
+  useEffect(() => {
+    let isMounted = true
+
+    const resolveStoredAttachmentNames = async () => {
+      const pendingUrls = storedAttachmentFiles.filter((url) => {
+        const directName = getDisplayFileName(url)
+        const storedFileId = getStoredFileId(url)
+
+        return !directName && Boolean(storedFileId) && !attachmentFileNames[url]
+      })
+
+      if (pendingUrls.length === 0) return
+
+      const resolvedEntries = await Promise.all(
+        pendingUrls.map(async (url) => {
+          const storedFileId = getStoredFileId(url)
+          if (!storedFileId) return null
+
+          try {
+            const response = await fetch(`/api/archivos?id=${storedFileId}&metadata=1`)
+            if (!response.ok) return null
+
+            const data = await response.json()
+            return [url, data.nombre as string] as const
+          } catch {
+            return null
+          }
+        })
+      )
+
+      if (!isMounted) return
+
+      const nextNames = Object.fromEntries(
+        resolvedEntries.filter((entry): entry is readonly [string, string] => Boolean(entry))
+      )
+
+      if (Object.keys(nextNames).length > 0) {
+        setAttachmentFileNames((prev) => ({ ...prev, ...nextNames }))
+      }
+    }
+
+    void resolveStoredAttachmentNames()
+
+    return () => {
+      isMounted = false
+    }
+  }, [attachmentFileNames, storedAttachmentFiles])
+
+  const filteredStoredAttachmentFiles = useMemo(() => {
+    if (!normalizedAttachmentSearch) return storedAttachmentFiles
+
+    return storedAttachmentFiles.filter((url) => {
+      const fileName =
+        attachmentFileNames[url] ||
+        getDisplayFileName(url) ||
+        `archivo ${getStoredFileId(url) ?? ""}`
+
+      return fileName.toLowerCase().includes(normalizedAttachmentSearch)
+    })
+  }, [attachmentFileNames, normalizedAttachmentSearch, storedAttachmentFiles])
+
+  const persistAttachments = useCallback(
+    async (nextAttachmentsUrl: string) => {
+      if (!equipmentRecord) {
+        toast({
+          title: "No se pudo guardar los anexos",
+          description: "Todavía no se ha cargado la información del equipo.",
+          variant: "destructive",
+        })
+        return false
+      }
+
+      setSavingAttachments(true)
+
+      try {
+        const response = await fetch("/api/equipos", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: equipmentRecord.id,
+            codigo: equipmentRecord.codigo,
+            version: equipmentRecord.version ?? null,
+            nombre: equipmentRecord.nombre,
+            area: equipmentRecord.area ?? null,
+            linea: equipmentRecord.linea ?? null,
+            marca: equipmentRecord.marca ?? null,
+            modelo: equipmentRecord.modelo ?? null,
+            fabricante: equipmentRecord.fabricante ?? null,
+            fecha_implementacion: equipmentRecord.fecha_implementacion ?? null,
+            fecha_adquisicion: equipmentRecord.fecha_adquisicion ?? null,
+            capacidad: equipmentRecord.capacidad ?? null,
+            amperaje: equipmentRecord.amperaje ?? null,
+            potencia: equipmentRecord.potencia ?? null,
+            voltaje: equipmentRecord.voltaje ?? null,
+            rpm: equipmentRecord.rpm ?? null,
+            magnitud_medida: equipmentRecord.magnitud_medida ?? null,
+            estado: equipmentRecord.estado ?? null,
+            imagen_url: equipmentRecord.imagen_url ?? null,
+            attachments_url: nextAttachmentsUrl || null,
+            imagenes_folder_url: equipmentRecord.imagenes_folder_url ?? null,
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error("No se pudo actualizar el equipo")
+        }
+
+        const updatedEquipment = (await response.json()) as EquipmentApiRow
+        const normalizedAttachmentsUrl = updatedEquipment.attachments_url ?? ""
+
+        setEquipmentRecord(updatedEquipment)
+        setAttachmentsUrl(normalizedAttachmentsUrl)
+        updateEquipmentAttachmentsInLocalCache(codigo, normalizedAttachmentsUrl)
+        emitLiveUpdate(["equipos"])
+        return true
+      } catch (error) {
+        await loadAttachmentsUrl({ silent: true })
+        toast({
+          title: "Error al guardar anexos",
+          description: error instanceof Error ? error.message : "No se pudieron guardar los anexos del equipo.",
+          variant: "destructive",
+        })
+        return false
+      } finally {
+        setSavingAttachments(false)
+      }
+    },
+    [codigo, equipmentRecord, loadAttachmentsUrl, toast]
+  )
+
+  const handleStoredAttachmentsChange = useCallback(
+    (value: string) => {
+      const nextAttachmentsUrl = buildAttachmentValue([
+        ...legacyDriveFolders,
+        ...parseAttachmentUrls(value),
+      ])
+
+      setAttachmentsUrl(nextAttachmentsUrl)
+      void persistAttachments(nextAttachmentsUrl)
+    },
+    [legacyDriveFolders, persistAttachments]
+  )
+
+  const handleDeleteStoredAttachment = useCallback(
+    async (urlToDelete: string) => {
+      const nextStoredFiles = storedAttachmentFiles.filter((url) => url !== urlToDelete)
+      const nextAttachmentsUrl = buildAttachmentValue([
+        ...legacyDriveFolders,
+        ...nextStoredFiles,
+      ])
+
+      setDeletingAttachmentUrl(urlToDelete)
+
+      try {
+        const saved = await persistAttachments(nextAttachmentsUrl)
+        if (!saved) {
+          throw new Error("No se pudo actualizar el listado de anexos del equipo")
+        }
+
+        const storedFileId = getStoredFileId(urlToDelete)
+        if (storedFileId) {
+          const idToken = currentUser ? await currentUser.getIdToken() : null
+          const deleteResponse = await fetch(`/api/archivos?id=${storedFileId}`, {
+            method: "DELETE",
+            headers: idToken
+              ? {
+                  Authorization: `Bearer ${idToken}`,
+                }
+              : undefined,
+          })
+
+          if (!deleteResponse.ok) {
+            const errorPayload = await deleteResponse.json().catch(() => null)
+            const errorMessage =
+              errorPayload?.error || "No se pudo eliminar el archivo de la base de datos"
+
+            if (deleteResponse.status !== 404) {
+              throw new Error(errorMessage)
+            }
+          }
+        }
+
+        setAttachmentFileNames((prev) => {
+          const next = { ...prev }
+          delete next[urlToDelete]
+          return next
+        })
+
+        toast({
+          title: "Anexo eliminado",
+          description: "El archivo se eliminó correctamente.",
+          variant: "success",
+        })
+      } catch (error) {
+        await loadAttachmentsUrl({ silent: true })
+        toast({
+          title: "Error al eliminar anexo",
+          description: error instanceof Error ? error.message : "No se pudo eliminar el anexo.",
+          variant: "destructive",
+        })
+      } finally {
+        setDeletingAttachmentUrl(null)
+      }
+    },
+    [currentUser, legacyDriveFolders, loadAttachmentsUrl, persistAttachments, storedAttachmentFiles, toast]
+  )
 
   const [startDateFilterParadas, setStartDateFilterParadas] = useState<string>("")
   const [endDateFilterParadas, setEndDateFilterParadas] = useState<string>("")
@@ -480,7 +795,16 @@ useEffect(() => {
                 </tr>
               </thead>
               <tbody>
-                {hojaVida.length === 0 ? (
+                {loadingHojaVida ? (
+                  <tr>
+                    <td colSpan={7} className="px-2 py-4 sm:px-3 text-center text-muted-foreground">
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="h-4 w-4 animate-spin rounded-full border border-current border-t-transparent"></div>
+                        <span>Cargando registros...</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : hojaVida.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-2 py-4 sm:px-3 text-center text-muted-foreground">
                       No hay registros de hoja de vida aún para este equipo.
@@ -503,7 +827,14 @@ useEffect(() => {
                         }}
                       >
                         <td className="px-2 py-1 sm:px-3 sm:py-2 align-top whitespace-nowrap">{row.fecha}</td>
-                        <td className="px-2 py-1 sm:px-3 sm:py-2 align-top max-w-[140px] sm:max-w-xs truncate" title={row.descripcion}>{row.descripcion}</td>
+                        <td className="px-2 py-1 sm:px-3 sm:py-2 align-top max-w-[140px] sm:max-w-xs" title={row.descripcion}>
+                          <div className="truncate">{row.descripcion}</div>
+                          {row.esSolicitada && (
+                            <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                              Solicitada
+                            </span>
+                          )}
+                        </td>
                         <td className="px-2 py-1 sm:px-3 sm:py-2 align-top whitespace-nowrap">{row.responsable}</td>
                         <td className="px-2 py-1 sm:px-3 sm:py-2 align-top max-w-[140px] sm:max-w-xs truncate" title={row.repuestos}>{row.repuestos}</td>
                         <td className="px-2 py-1 sm:px-3 sm:py-2 align-top whitespace-nowrap">{row.tipo}</td>
@@ -555,51 +886,11 @@ useEffect(() => {
                                 <span className="font-medium text-muted-foreground shrink-0">Observaciones:</span>
                                 <span className="whitespace-pre-wrap break-all">{row.observaciones || "-"}</span>
                               </div>
-                              {(row.imagenAntesUrl || row.imagenDespuesUrl || row.anexoUrl) && (
-                                <div className="flex gap-2 sm:col-span-2 pt-2 border-t mt-2">
-                                  <span className="font-medium text-muted-foreground shrink-0 flex items-center gap-1">
-                                    <ImageIcon className="h-3.5 w-3.5" /> Adjuntos:
-                                  </span>
-                                  <div className="flex flex-wrap gap-2">
-                                    {row.imagenAntesUrl && (
-                                      <a
-                                        href={row.imagenAntesUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 text-[10px] sm:text-xs"
-                                      >
-                                        <ImageIcon className="h-3 w-3" />
-                                        Imagen Antes
-                                        <ExternalLink className="h-3 w-3" />
-                                      </a>
-                                    )}
-                                    {row.imagenDespuesUrl && (
-                                      <a
-                                        href={row.imagenDespuesUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 px-2 py-1 rounded bg-green-50 text-green-700 hover:bg-green-100 text-[10px] sm:text-xs"
-                                      >
-                                        <ImageIcon className="h-3 w-3" />
-                                        Imagen Después
-                                        <ExternalLink className="h-3 w-3" />
-                                      </a>
-                                    )}
-                                    {row.anexoUrl && (
-                                      <a
-                                        href={row.anexoUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 px-2 py-1 rounded bg-orange-50 text-orange-700 hover:bg-orange-100 text-[10px] sm:text-xs"
-                                      >
-                                        <FileText className="h-3 w-3" />
-                                        Archivo Anexo
-                                        <ExternalLink className="h-3 w-3" />
-                                      </a>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
+                              <MultiFileSection
+                                imagenAntesUrl={row.imagenAntesUrl}
+                                imagenDespuesUrl={row.imagenDespuesUrl}
+                                anexoUrl={row.anexoUrl}
+                              />
                             </div>
                           </td>
                         </tr>
@@ -728,32 +1019,103 @@ useEffect(() => {
             {loadingAttachments ? (
               <div className="flex items-center gap-2">
                 <div className="h-4 w-4 animate-spin rounded-full border border-current border-t-transparent"></div>
-                <span>Cargando carpeta...</span>
+                <span>Cargando anexos...</span>
               </div>
-            ) : attachmentsUrl ? (
-              <button
-                type="button"
-                className="flex items-center gap-3 rounded-md border bg-background px-4 py-3 text-left hover:bg-accent/60"
-                onClick={() => {
-                  if (attachmentsUrl) {
-                    window.open(attachmentsUrl, "_blank")
-                  }
-                }}
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
-                  <Folder className="h-5 w-5" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="font-medium">Carpeta de anexos en Drive</span>
-                  <span className="text-xs text-muted-foreground">
-                    Haz clic para abrir la carpeta de documentos, manuales y planos de este equipo en una nueva pestaña.
-                  </span>
-                </div>
-              </button>
             ) : (
-              <p className="text-xs text-muted-foreground">
-                Este equipo aún no tiene configurada una carpeta de anexos. Agrega la URL de la carpeta de Drive desde el formulario de equipos.
-              </p>
+              <>
+                <div className="space-y-3 rounded-md border bg-background p-4">
+                  <div>
+                    <p className="font-medium text-foreground">Adjuntar anexos del equipo</p>
+                    <p className="text-xs text-muted-foreground">
+                      Sube manuales, fichas tecnicas, planos y otros documentos despues de crear el equipo. No hay limite de cantidad.
+                    </p>
+                  </div>
+
+                  <MultiFileUploader
+                    value={storedAttachmentFiles.join(",")}
+                    onChange={handleStoredAttachmentsChange}
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z,.jpg,.jpeg,.png,.webp,.gif"
+                    label="Anexos del equipo"
+                    maxFiles={null}
+                    showCamera={false}
+                    uploadMode="manual"
+                    uploadButtonLabel="Adjuntar"
+                  />
+
+                  {savingAttachments && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <div className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent"></div>
+                      <span>Guardando cambios en los anexos...</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3 rounded-md border bg-background p-4">
+                  <div className="space-y-2">
+                    <p className="font-medium text-foreground">Buscar archivos</p>
+                    <Input
+                      value={attachmentSearch}
+                      onChange={(e) => setAttachmentSearch(e.target.value)}
+                      placeholder="Buscar por nombre de archivo..."
+                      className="h-9"
+                    />
+                  </div>
+
+                  {storedAttachmentFiles.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Este equipo aun no tiene archivos adjuntos para buscar.
+                    </p>
+                  ) : filteredStoredAttachmentFiles.length > 0 ? (
+                    <MultiFileViewer
+                      urls={filteredStoredAttachmentFiles.join(",")}
+                      label="Archivos del equipo"
+                      variant="orange"
+                      isImage={false}
+                      onDeleteFile={isJefe ? handleDeleteStoredAttachment : undefined}
+                      deletingUrl={deletingAttachmentUrl}
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      No hay archivos que coincidan con la busqueda realizada.
+                    </p>
+                  )}
+                </div>
+
+                {legacyDriveFolders.length > 0 && (
+                  <div className="space-y-3">
+                    <div>
+                      <p className="font-medium text-foreground">Links legacy de Drive</p>
+                      <p className="text-xs text-muted-foreground">
+                        Estos enlaces antiguos se mantienen disponibles para no perder el acceso historico.
+                      </p>
+                    </div>
+                    {legacyDriveFolders.map((url, index) => (
+                      <button
+                        key={`${url}-${index}`}
+                        type="button"
+                        className="flex w-full items-center gap-3 rounded-md border bg-background px-4 py-3 text-left hover:bg-accent/60"
+                        onClick={() => window.open(url, "_blank")}
+                      >
+                        <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
+                          <Folder className="h-5 w-5" />
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="font-medium text-foreground">Carpeta de anexos en Drive</span>
+                          <span className="text-xs text-muted-foreground break-words [overflow-wrap:anywhere]">
+                            {url}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {attachmentEntries.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Este equipo aun no tiene anexos cargados.
+                  </p>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -868,52 +1230,11 @@ useEffect(() => {
               )}
 
               {/* Links a imágenes y anexos */}
-              {(selectedHojaVidaRow.imagenAntesUrl || selectedHojaVidaRow.imagenDespuesUrl || selectedHojaVidaRow.anexoUrl) && (
-                <div className="space-y-2 pt-2 border-t">
-                  <Label className="text-muted-foreground text-xs flex items-center gap-1">
-                    <ImageIcon className="h-3.5 w-3.5" />
-                    Evidencia Fotográfica y Anexos
-                  </Label>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedHojaVidaRow.imagenAntesUrl && (
-                      <a
-                        href={selectedHojaVidaRow.imagenAntesUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 text-sm font-medium"
-                      >
-                        <ImageIcon className="h-4 w-4" />
-                        Imagen Antes
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
-                    )}
-                    {selectedHojaVidaRow.imagenDespuesUrl && (
-                      <a
-                        href={selectedHojaVidaRow.imagenDespuesUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-green-50 text-green-700 hover:bg-green-100 text-sm font-medium"
-                      >
-                        <ImageIcon className="h-4 w-4" />
-                        Imagen Después
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
-                    )}
-                    {selectedHojaVidaRow.anexoUrl && (
-                      <a
-                        href={selectedHojaVidaRow.anexoUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-orange-50 text-orange-700 hover:bg-orange-100 text-sm font-medium"
-                      >
-                        <FileText className="h-4 w-4" />
-                        Archivo Anexo
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
+              <MultiFileSection
+                imagenAntesUrl={selectedHojaVidaRow.imagenAntesUrl}
+                imagenDespuesUrl={selectedHojaVidaRow.imagenDespuesUrl}
+                anexoUrl={selectedHojaVidaRow.anexoUrl}
+              />
             </div>
           )}
           <DialogFooter>
@@ -971,9 +1292,6 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
         const data = Array.isArray(json?.data) ? json.data : []
         // Asegurar que el precio se mapee correctamente
         const mappedData = data.map((r: any) => {
-          // Debug: ver qué viene de la API
-          console.log('Repuesto desde API:', { id: r.id, nombre: r.nombre, precio_raw: r.precio, tipo_precio: typeof r.precio })
-          
           // Procesar precio: puede venir como string, number, null, undefined, o "0"
           // IMPORTANTE: 0 es un valor válido, no debe tratarse como null
           let precioValue: number | null = null
@@ -993,8 +1311,6 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
               }
             }
           }
-          
-          console.log('Precio procesado:', precioValue, 'tipo:', typeof precioValue, 'es 0?', precioValue === 0)
           return {
             ...r,
             precio: precioValue
@@ -1059,8 +1375,6 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
   }
 
   const openForEdit = (rep: Repuesto) => {
-    console.log('Abriendo para editar repuesto:', rep)
-    console.log('Precio del repuesto:', rep.precio, 'tipo:', typeof rep.precio)
     setEditing(rep)
     setCodigoRepuesto(rep.codigo_repuesto)
     setNombre(rep.nombre)
@@ -1068,7 +1382,6 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
     setCantidad(rep.cantidad)
     // Manejar precio: si es null/undefined usar "", si es 0 o número usar el número
     const precioValue = rep.precio === null || rep.precio === undefined ? "" : rep.precio
-    console.log('Precio establecido en formulario:', precioValue)
     setPrecio(precioValue)
     setUbicacion(rep.ubicacion || "")
     setFotoFile(null)
@@ -1121,8 +1434,6 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
 
       if (!res.ok) throw new Error(isEdit ? "Error al actualizar el repuesto" : "Error al guardar el repuesto")
       const saved = await res.json()
-      console.log('Respuesta del servidor después de guardar:', saved)
-      console.log('Precio en respuesta:', saved.precio, 'tipo:', typeof saved.precio)
       
       // Asegurar que el precio se mapee correctamente (incluyendo cuando es 0)
       let precioMapped: number | null = null
@@ -1134,9 +1445,6 @@ function RepuestosSection({ codigoEquipo }: { codigoEquipo: string }) {
           precioMapped = Number(saved.precio)
         }
       }
-      
-      console.log('Precio mapeado:', precioMapped)
-      
       const savedMapped = {
         ...saved,
         precio: precioMapped

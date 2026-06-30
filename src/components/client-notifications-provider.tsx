@@ -1,7 +1,7 @@
 "use client";
 
 import { NotificationsProvider } from "@/context/notifications-context";
-import ServiceWorkerRegistration from "@/components/service-worker-registration";
+import { PushNotificationsManager } from "@/components/push-notifications-manager";
 
 export function ClientNotificationsProvider({
   children
@@ -10,7 +10,7 @@ export function ClientNotificationsProvider({
 }) {
   return (
     <NotificationsProvider>
-      <ServiceWorkerRegistration />
+      <PushNotificationsManager />
       {children}
     </NotificationsProvider>
   );

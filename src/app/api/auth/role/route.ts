@@ -48,13 +48,14 @@ export async function POST(req: Request) {
 
     const isJefe = dbUser.rol === 'JEFE';
     const isTecnico = dbUser.rol === 'TECNICO';
+    const isInvitado = dbUser.rol === 'INVITADO';
 
     return NextResponse.json({
       isAdmin: isJefe,
-      role: isJefe ? 'JEFE' : (isTecnico ? 'TECNICO' : 'NONE'),
+      role: isJefe ? 'JEFE' : (isTecnico ? 'TECNICO' : (isInvitado ? 'INVITADO' : 'NONE')),
       permissions: isJefe 
         ? ['read', 'write', 'delete', 'admin', 'create', 'update'] 
-        : (isTecnico ? ['read', 'write'] : ['read'])
+        : (isTecnico ? ['read', 'write'] : (isInvitado ? ['read'] : []))
     });
   } catch (error) {
     console.error('Error verificando rol de usuario:', error);

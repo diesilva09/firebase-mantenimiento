@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { z } from "zod"
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast"
 import { useEquipos } from "@/hooks/use-equipos"
 import { useUser } from "@/firebase/auth/use-user"
 import { useDashboardSearch, type SearchSuggestion } from "@/context/dashboard-search-context"
+import { emitLiveUpdate, useLiveRefresh } from "@/hooks/use-live-refresh"
 
 import { Form, FormItem, FormLabel, FormControl, FormMessage } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
@@ -22,14 +23,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Eye, MoreHorizontal, Download, FileSpreadsheet, FileText, File, X, Maximize2 } from "lucide-react"
 import { initializeFirebase } from "@/firebase"
-
-// Export libraries
-import * as XLSX from "xlsx"
-import jsPDF from "jspdf"
-import "jspdf-autotable"
-import { Document, Packer, Paragraph, Table, TableCell, TableRow, WidthType, TextRun } from "docx"
-import { saveAs } from "file-saver"
-
 
 // helper
 async function getAuthHeaders() {
@@ -225,28 +218,40 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
     setImagePreviewOpen(true)
   }
 
-  useEffect(() => {
-    async function loadInventario() {
+  const loadInventario = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
       setLoadingRepuestos(true)
-      setErrorRepuestos(null)
-      try {
-        const res = await fetch("/api/inventario")
-        if (!res.ok) {
-          throw new Error("No se pudo cargar el inventario")
-        }
-        const json = await res.json()
-        const data = Array.isArray(json.data) ? json.data : []
-        setRepuestos(data.map(mapRowToRepuestoItem))
-      } catch (err: any) {
-        console.error("Error cargando inventario:", err)
-        setErrorRepuestos(err.message || "Error cargando inventario")
-      } finally {
+    }
+
+    setErrorRepuestos(null)
+    try {
+      const res = await fetch("/api/inventario")
+      if (!res.ok) {
+        throw new Error("No se pudo cargar el inventario")
+      }
+      const json = await res.json()
+      const data = Array.isArray(json.data) ? json.data : []
+      setRepuestos(data.map(mapRowToRepuestoItem))
+    } catch (err: any) {
+      console.error("Error cargando inventario:", err)
+      setErrorRepuestos(err.message || "Error cargando inventario")
+    } finally {
+      if (!options?.silent) {
         setLoadingRepuestos(false)
       }
     }
-
-    loadInventario()
   }, [])
+
+  useEffect(() => {
+    void loadInventario()
+  }, [loadInventario])
+
+  useLiveRefresh({
+    callback: () => loadInventario({ silent: true }),
+    scopes: ["inventario"],
+    intervalMs: 20000,
+    immediate: false,
+  })
 
   // Registrar sugerencias globales de repuestos (código, categoría, subcategoría y nombre)
   useEffect(() => {
@@ -541,6 +546,8 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
         setRepuestos((prev) => [item, ...prev])
       }
 
+      emitLiveUpdate(["inventario"])
+
       setOpen(false)
       setEditingId(null)
 
@@ -661,6 +668,8 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
       setRepuestos((prev) => prev.filter((r) => r.id !== id))
       if (descripcionExpandidaId === id) setDescripcionExpandidaId(null)
 
+      emitLiveUpdate(["inventario"])
+
       toast({
         title: "Repuesto eliminado",
         description: "El repuesto se eliminó correctamente del inventario.",
@@ -777,6 +786,8 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
         )
       }
 
+      emitLiveUpdate(["inventario"])
+
       toast({
         title: "Solicitud de uso registrada",
         description: `Se registró la solicitud de uso para el repuesto ${usoRepuesto.codigo}.`,
@@ -830,7 +841,9 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
     return "bg-emerald-200 border-l-4 border-emerald-500 font-semibold"
   }
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
+    const XLSX = await import("xlsx")
+
     const dataToExport = repuestos.map(r => ({
       'Código': r.codigo,
       'Nombre': r.nombre,
@@ -855,7 +868,12 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
     toast({ title: "Exportación Exitosa", description: "El inventario se ha exportado a Excel." });
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ])
+
     const doc = new jsPDF();
     doc.text("Inventario de Repuestos", 14, 16);
     
@@ -874,7 +892,7 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
       tableRows.push(repuestoData);
     });
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       head: [tableColumn],
       body: tableRows,
       startY: 20,
@@ -884,7 +902,13 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
     toast({ title: "Exportación Exitosa", description: "El inventario se ha exportado a PDF." });
   };
 
-  const handleExportWord = () => {
+  const handleExportWord = async () => {
+    const [{ Document, Packer, Paragraph, Table, TableCell, TableRow, WidthType, TextRun }, { saveAs }] =
+      await Promise.all([
+        import("docx"),
+        import("file-saver"),
+      ])
+
     const headers = [
       'Código', 'Nombre', 'Categoría', 'Subcategoría', 'Precio', 'Stock Actual'
     ];
@@ -917,10 +941,9 @@ function mapRowToRepuestoItem(row: any): RepuestoItem {
       sections: [{ children: [ new Paragraph({ children: [new TextRun({ text: "Inventario de Repuestos", bold: true, size: 28 })] }), table ] }],
     });
 
-    Packer.toBlob(doc).then(blob => {
-      saveAs(blob, "inventario_repuestos.docx");
-      toast({ title: "Exportación Exitosa", description: "El inventario se ha exportado a Word." });
-    });
+    const blob = await Packer.toBlob(doc)
+    saveAs(blob, "inventario_repuestos.docx");
+    toast({ title: "Exportación Exitosa", description: "El inventario se ha exportado a Word." });
   };
 
   return (

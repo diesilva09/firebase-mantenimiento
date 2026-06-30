@@ -1,40 +1,40 @@
-import { Task, User } from './types'
+import { Task, User } from './types';
 
 // Función para mapear tareas de la base de datos al formato del frontend
 export function mapDatabaseTaskToFrontend(dbTask: any, users: User[]): Task {
   // Determinar el estado basado en la fecha y el estado de la BD
-  let status: Task['status'] = 'Pendiente'
-  const today = new Date()
-  const executionDate = new Date(dbTask.fecha_programada)
-  
+  let status: Task['status'] = 'Pendiente';
+  const today = new Date();
+  const executionDate = new Date(dbTask.fecha_programada);
+
   if (dbTask.estado === 'completada') {
-    status = 'Completada'
+    status = 'Completada';
   } else if (executionDate > today) {
-    status = 'Futura'
+    status = 'Futura';
   }
 
   // Buscar usuario responsable
-  const assignedTo = users.find(user => 
+  const assignedTo = users.find(user =>
     user.name.toLowerCase().includes(dbTask.responsable.toLowerCase()) ||
     dbTask.responsable.toLowerCase().includes(user.name.toLowerCase())
   ) || {
     id: `custom-${dbTask.id}`,
     name: dbTask.responsable,
     avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(dbTask.responsable)}/40/40`
-  }
+  };
 
   // Usuario que ejecutó la tarea (si existe en la BD)
-  let executedBy = undefined
+  let executedBy = undefined;
   if (dbTask.ejecutado_por) {
-    const name = dbTask.ejecutado_por as string
-    executedBy = users.find(user => 
+    const name = dbTask.ejecutado_por as string;
+    executedBy = users.find(user =>
       user.name.toLowerCase().includes(name.toLowerCase()) ||
       name.toLowerCase().includes(user.name.toLowerCase())
     ) || {
       id: `executed-${dbTask.id}`,
       name,
       avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`
-    }
+    };
   }
 
   return {
@@ -58,55 +58,54 @@ export function mapDatabaseTaskToFrontend(dbTask: any, users: User[]): Task {
     intervalo: dbTask.intervalo ?? null,
     anticipacion_dias: dbTask.anticipacion_dias ?? null,
     // Campos adicionales usados en TaskDetailsDialog (se acceden como any)
-    // Estos campos pueden estar presentes en la tabla tareas_cronograma
-    // y permiten mostrar Tipo Mantenimiento, Repuestos y Observaciones
     ...(dbTask.tipo_mantenimiento && { maintenanceType: dbTask.tipo_mantenimiento }),
     ...(dbTask.repuestos_usados && { sparesUsed: dbTask.repuestos_usados }),
     ...(dbTask.observaciones && { observations: dbTask.observaciones }),
-  } as any
+  } as any;
 }
 
-// Función para obtener tareas desde la API
+// Función para obtener tareas desde la API (CORREGIDA: usa rutas relativas)
 export async function fetchTasksFromDB(schedule?: string, userEmail?: string | null): Promise<any[]> {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-    const urlObj = new URL(
+    // 🔥 CORRECCIÓN: Usamos ruta relativa, sin baseUrl
+    const url = new URL(
       schedule
-        ? `${baseUrl}/api/tareas?cronograma=${encodeURIComponent(schedule)}`
-        : `${baseUrl}/api/tareas`
-    )
+        ? `/api/tareas?cronograma=${encodeURIComponent(schedule)}`
+        : '/api/tareas',
+      window.location.origin // toma automáticamente el origen actual (http://192.168.0.164:3000)
+    );
 
     if (userEmail) {
-      urlObj.searchParams.set('userEmail', userEmail)
+      url.searchParams.set('userEmail', userEmail);
     }
-    
-    const response = await fetch(urlObj.toString(), {
+
+    const response = await fetch(url.toString(), {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
       cache: 'no-store'
-    })
+    });
 
     if (!response.ok) {
-      throw new Error('Error fetching tasks from database')
+      throw new Error('Error fetching tasks from database');
     }
 
-    const result = await response.json()
-    return result.data || []
+    const result = await response.json();
+    return result.data || [];
   } catch (error) {
-    console.error('Error fetching tasks:', error)
-    return []
+    console.error('Error fetching tasks:', error);
+    return [];
   }
 }
 
-// Función para completar una tarea
+// Función para completar una tarea (ya usa ruta relativa, está bien)
 export async function completeTaskInDB(
   taskId: string,
   workDone: string,
   executedBy: string,
-  imageBefore?: string,
-  imageAfter?: string,
+  imageBeforeUrl?: string,
+  imageAfterUrl?: string,
   completionDate?: string,
   tipoMantenimiento?: string,
   repuestos?: string,
@@ -124,8 +123,8 @@ export async function completeTaskInDB(
         taskId,
         workDone,
         executedBy,
-        imageBefore,
-        imageAfter,
+        imageBeforeUrl,
+        imageAfterUrl,
         completionDate: completionDate || new Date().toISOString(),
         tipoMantenimiento,
         repuestos,
@@ -133,16 +132,16 @@ export async function completeTaskInDB(
         modoManual,
         anexoUrl,
       })
-    })
+    });
 
-    return response.ok
+    return response.ok;
   } catch (error) {
-    console.error('Error completing task:', error)
-    return false
+    console.error('Error completing task:', error);
+    return false;
   }
 }
 
-// ✅ AGREGAR ESTA FUNCIÓN - Actualizar tarea
+// Función para actualizar tarea (ya usa ruta relativa, está bien)
 export async function updateTaskInDB(taskData: any): Promise<boolean> {
   try {
     const response = await fetch('/api/tareas', {
@@ -151,32 +150,31 @@ export async function updateTaskInDB(taskData: any): Promise<boolean> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(taskData)
-    })
+    });
 
-    return response.ok
+    return response.ok;
   } catch (error) {
-    console.error('Error updating task:', error)
-    return false
+    console.error('Error updating task:', error);
+    return false;
   }
 }
 
-// ✅ AGREGAR ESTA FUNCIÓN - Eliminar tarea
+// Función para eliminar tarea (ya usa ruta relativa, está bien)
 export async function deleteTaskInDB(taskId: string): Promise<boolean> {
   try {
     const response = await fetch(`/api/tareas?id=${taskId}`, {
       method: 'DELETE',
-    })
+    });
 
     // Si la API responde 404, asumimos que la tarea ya no existe en la BD
-    // y permitimos que el frontend la elimine igual de la UI.
     if (response.status === 404) {
-      console.warn(`Tarea ${taskId} no encontrada en la BD al intentar eliminarla (404).`)
-      return true
+      console.warn(`Tarea ${taskId} no encontrada en la BD al intentar eliminarla (404).`);
+      return true;
     }
 
-    return response.ok
+    return response.ok;
   } catch (error) {
-    console.error('Error deleting task:', error)
-    return false
+    console.error('Error deleting task:', error);
+    return false;
   }
 }

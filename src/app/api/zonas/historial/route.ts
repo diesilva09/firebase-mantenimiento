@@ -1,6 +1,19 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 
+async function getZonasHistorialColumns() {
+  const { rows } = await query(
+    `
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'zonas_historial'
+    `
+  );
+
+  return new Set(rows.map((row: { column_name: string }) => String(row.column_name)));
+}
+
 // POST /api/zonas/historial
 // Crea un registro de hoja de vida en la tabla zonas_historial
 export async function POST(req: Request) {
@@ -9,6 +22,7 @@ export async function POST(req: Request) {
   }
 
   try {
+    const availableColumns = await getZonasHistorialColumns();
     const body = await req.json();
 
     const {
@@ -24,6 +38,9 @@ export async function POST(req: Request) {
       imagenAntesUrl,
       imagenDespuesUrl,
       anexoUrl,
+      esSolicitada,
+      solicitudId,
+      origenOrden,
     } = body || {};
 
     if (!codigoZona || !labor) {
@@ -31,13 +48,15 @@ export async function POST(req: Request) {
     }
 
     const codigoZonaTrimmed = codigoZona.trim();
-    console.log('Guardando en zonas_historial - codigo_zona:', codigoZonaTrimmed);
-
     const values: any[] = [];
     const columns: string[] = [];
     const placeholders: string[] = [];
 
     const pushField = (column: string, value: any) => {
+      if (!availableColumns.has(column)) {
+        return;
+      }
+
       if (value !== undefined && value !== null) {
         columns.push(column);
         values.push(value);
@@ -57,6 +76,9 @@ export async function POST(req: Request) {
     pushField("imagen_antes_url", imagenAntesUrl ?? null);
     pushField("imagen_despues_url", imagenDespuesUrl ?? null);
     pushField("anexo_url", anexoUrl ?? null);
+    pushField("es_solicitada", esSolicitada ?? false);
+    pushField("solicitud_id", solicitudId ?? null);
+    pushField("origen_orden", origenOrden ?? "manual");
 
     const sql = `
       INSERT INTO zonas_historial (${columns.join(", ")})
@@ -81,6 +103,7 @@ export async function GET(req: Request) {
   }
 
   try {
+    const availableColumns = await getZonasHistorialColumns();
     const { searchParams } = new URL(req.url);
     const codigoZona = searchParams.get("codigoZona");
 
@@ -89,7 +112,19 @@ export async function GET(req: Request) {
     }
 
     const codigoZonaTrimmed = codigoZona.trim();
-    console.log('Buscando historial para zona:', codigoZona, '| Trimmed:', codigoZonaTrimmed);
+
+    const selectEsSolicitada = availableColumns.has("es_solicitada")
+      ? "es_solicitada"
+      : "false AS es_solicitada";
+    const selectSolicitudId = availableColumns.has("solicitud_id")
+      ? "solicitud_id"
+      : "NULL::integer AS solicitud_id";
+    const selectOrigenOrden = availableColumns.has("origen_orden")
+      ? "origen_orden"
+      : "NULL::text AS origen_orden";
+    const selectCreatedAt = availableColumns.has("created_at")
+      ? "created_at"
+      : "NULL::timestamp AS created_at";
 
     const { rows } = await query(
       `
@@ -104,18 +139,19 @@ export async function GET(req: Request) {
         observaciones,
         ejecutado_por,
         creado_por,
+        ${selectEsSolicitada},
+        ${selectSolicitudId},
+        ${selectOrigenOrden},
         imagen_antes_url,
         imagen_despues_url,
         anexo_url,
-        created_at
+        ${selectCreatedAt}
       FROM zonas_historial
       WHERE TRIM(codigo_zona) = $1
       ORDER BY fecha_evento DESC, id DESC
       `,
       [codigoZonaTrimmed]
     );
-
-    console.log('Registros encontrados:', rows.length, 'para zona:', codigoZonaTrimmed);
 
     return NextResponse.json({ data: rows });
   } catch (err) {

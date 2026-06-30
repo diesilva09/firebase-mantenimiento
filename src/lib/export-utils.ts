@@ -1,12 +1,8 @@
 // src/lib/export-utils.ts
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { Document, Packer, Paragraph, Table, TableCell, TableRow, WidthType, HeadingLevel, TextRun } from 'docx';
-import { saveAs } from 'file-saver';
 
 // --- EXCEL ---
-export const exportToExcel = (data: any[], fileName: string) => {
+export const exportToExcel = async (data: any[], fileName: string) => {
+  const XLSX = await import('xlsx');
   const worksheet = XLSX.utils.json_to_sheet(data);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Datos");
@@ -14,7 +10,11 @@ export const exportToExcel = (data: any[], fileName: string) => {
 };
 
 // --- PDF ---
-export const exportToPDF = (data: any[], columns: string[], title: string, fileName: string) => {
+export const exportToPDF = async (data: any[], columns: string[], title: string, fileName: string) => {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
   const doc = new jsPDF();
   
   // Título
@@ -39,6 +39,12 @@ export const exportToPDF = (data: any[], columns: string[], title: string, fileN
 
 // --- WORD ---
 export const exportToWord = async (data: any[], columns: string[], title: string, fileName: string) => {
+  const [{ Document, Packer, Paragraph, Table, TableCell, TableRow, WidthType, HeadingLevel, TextRun }, { saveAs }] =
+    await Promise.all([
+      import('docx'),
+      import('file-saver'),
+    ]);
+
   // Crear filas de la tabla
   const tableRows = [
     // Encabezado
