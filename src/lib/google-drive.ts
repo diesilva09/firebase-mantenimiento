@@ -10,12 +10,11 @@ function getDriveClient() {
     throw new Error('Google Drive credentials not configured');
   }
 
-  const auth = new google.auth.JWT(
-    clientEmail,
-    undefined,
-    privateKey,
-    SCOPES
-  );
+  const auth = new google.auth.JWT({
+    email: clientEmail,
+    key: privateKey,
+    scopes: SCOPES,
+  });
 
   return google.drive({ version: 'v3', auth });
 }

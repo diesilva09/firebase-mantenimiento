@@ -22,9 +22,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import type { Task, TaskStatus, Schedule, User } from "@/lib/types"
-import { format } from "date-fns"
+import type { Task, TaskStatus, Schedule } from "@/lib/types"
+import { format, formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale"
+import { sortTasksByRecency } from "@/lib/task-utils"
 import {
   Accordion,
   AccordionContent,
@@ -37,7 +38,6 @@ import {
 
 interface TaskTableViewProps {
   tasks: Task[];
-  users: User[];
   isAdmin: boolean;
   onOpenComplete: (task: Task) => void;
   onOpenEdit: (task: Task) => void;
@@ -80,6 +80,15 @@ function TaskTable({
   onTaskClick: (task: Task) => void,
   loadingSpecsId?: string | null
 }) {
+  const formatCompletionDate = (task: Task): string => {
+    if (!task.completionDate) return '-'
+    const date = new Date(task.completionDate)
+    if (task.status === 'Completada') {
+      return `Completada ${formatDistanceToNow(date, { addSuffix: true, locale: es })}`
+    }
+    return format(date, "PPP", { locale: es })
+  }
+
   const getExecutedDisplay = (task: Task): { label: string; name?: string } => {
     const executedName = task.executedBy?.name || ""
     if (!executedName) return { label: "-" }
@@ -184,7 +193,7 @@ function TaskTable({
                       <div className="flex flex-wrap gap-x-4 gap-y-1">
                         <span>
                           <span className="font-medium">Fecha ejec.:</span>{" "}
-                          {task.completionDate ? format(new Date(task.completionDate), "PPP", { locale: es }) : '-'}
+                          {formatCompletionDate(task)}
                         </span>
                         <span>
                           <span className="font-medium">Próx. ejec.:</span>{" "}
@@ -219,7 +228,7 @@ function TaskTable({
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
                       {task.completionDate ? (
-                        format(new Date(task.completionDate), "PPP", { locale: es })
+                        formatCompletionDate(task)
                       ) : (
                         <span className="text-muted-foreground">-</span>
                       )}
@@ -303,6 +312,9 @@ function ScheduleTaskList({ schedule, tasks, onCompletedSeen, seenCompletedIds, 
             if (grouped[task.status]) {
                 grouped[task.status].push(task);
             }
+        });
+        (Object.keys(grouped) as TaskStatus[]).forEach((status) => {
+            grouped[status] = sortTasksByRecency(grouped[status]);
         });
         return grouped;
     }, [tasks]);

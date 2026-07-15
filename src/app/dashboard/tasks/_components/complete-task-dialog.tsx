@@ -30,8 +30,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import type { Task, User } from "@/lib/types"
+import { technicians, PERSONAL_EXTERNO_VALUE, OTRO_TECNICO_VALUE } from "@/lib/technicians"
 import { useToast } from "@/hooks/use-toast"
 import { useFormPersistence } from "@/hooks/use-form-persistence"
+import { getOperationErrorMessage, isBrowserOffline } from "@/lib/toast-utils"
 import { MultiFileUploader } from "@/components/multi-file-uploader"
 
 const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB
@@ -52,7 +54,7 @@ const completeSchema = z
   })
   .refine(
     (data) => (
-      data.executedById === "otro" || data.executedById === "personal-externo"
+      data.executedById === OTRO_TECNICO_VALUE || data.executedById === PERSONAL_EXTERNO_VALUE
         ? Boolean(data.customExecutedBy?.trim())
         : true
     ),
@@ -68,7 +70,6 @@ interface CompleteTaskDialogProps {
   isOpen: boolean
   setIsOpen: (isOpen: boolean) => void
   task: Task
-  users: User[]
   onComplete: (
     taskId: string,
     workDone: string,
@@ -90,7 +91,7 @@ interface EquipoInfo {
   codigo?: string
 }
 
-export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete }: CompleteTaskDialogProps) {
+export function CompleteTaskDialog({ isOpen, setIsOpen, task, onComplete }: CompleteTaskDialogProps) {
   const { toast } = useToast()
   const [equipoInfo, setEquipoInfo] = useState<EquipoInfo | null>(null);
   const [loadingEquipo, setLoadingEquipo] = useState(false);
@@ -166,11 +167,16 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
   }
 
   async function onSubmit(data: CompleteFormValues) {
+    if (isBrowserOffline()) {
+      toast({ ...getOperationErrorMessage(), variant: "destructive" });
+      return;
+    }
+
     let executedByUser: User;
 
-    if ((data.executedById === "otro" || data.executedById === "personal-externo") && data.customExecutedBy) {
+    if ((data.executedById === OTRO_TECNICO_VALUE || data.executedById === PERSONAL_EXTERNO_VALUE) && data.customExecutedBy) {
       const baseName = data.customExecutedBy.trim();
-      const name = data.executedById === "personal-externo"
+      const name = data.executedById === PERSONAL_EXTERNO_VALUE
         ? `Personal Externo - ${baseName}`
         : baseName;
       executedByUser = {
@@ -179,13 +185,14 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
         avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`,
       };
     } else {
-      const selectedUser = users.find(u => u.id === data.executedById);
+      const selectedUser = technicians.find(u => u.id === data.executedById);
       if (selectedUser) {
         executedByUser = selectedUser;
       } else {
         executedByUser = {
-          id: "unknown",
-          name: "Desconocido",
+          id: data.executedById,
+          name: data.executedById,
+          avatarUrl: '',
         };
       }
     }
@@ -210,18 +217,18 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
       data.anexoUrl || undefined,
     )
     if (success) {
-      toast({
-        title: "Tarea Completada",
-        description: `La tarea ${task.code} ha sido marcada como completada.`,
-      })
       setIsOpen(false)
       resetDialog()
     } else {
+      const err = getOperationErrorMessage(
+        undefined,
+        'Ocurrió un error al guardar los datos. Revisa el texto ingresado e inténtalo nuevamente.',
+      );
       toast({
-        title: "No se pudo completar la tarea",
-        description: "Ocurrió un error al guardar los datos. Revisa el texto ingresado e inténtalo nuevamente.",
+        title: err.title === 'Sin conexión a internet' ? err.title : 'No se pudo completar la tarea',
+        description: err.description,
         variant: "destructive",
-      })
+      });
     }
   }
 
@@ -274,18 +281,18 @@ export function CompleteTaskDialog({ isOpen, setIsOpen, task, users, onComplete 
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {users.map((user) => (
+                        {technicians.map((user) => (
                           <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
                         ))}
-                        <SelectItem value="otro">Otro técnico</SelectItem>
-                        <SelectItem value="personal-externo">Personal Externo</SelectItem>
+                        <SelectItem value={OTRO_TECNICO_VALUE}>Otro técnico</SelectItem>
+                        <SelectItem value={PERSONAL_EXTERNO_VALUE}>Personal Externo</SelectItem>
                        </SelectContent>
                     </Select>
                   <FormMessage />
                 </FormItem>
               )}
             />
-            {(form.watch("executedById") === "otro" || form.watch("executedById") === "personal-externo") && (
+            {(form.watch("executedById") === OTRO_TECNICO_VALUE || form.watch("executedById") === PERSONAL_EXTERNO_VALUE) && (
               <FormField
                 control={form.control}
                 name="customExecutedBy"

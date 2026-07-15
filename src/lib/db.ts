@@ -24,6 +24,9 @@ function getPgPool() {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { Pool } = require('pg')
     pgPool = new Pool({ connectionString: process.env.DATABASE_URL })
+    pgPool.on("error", (err: Error) => {
+      console.error("Error inesperado en el pool de PostgreSQL:", err.message)
+    })
   }
   return pgPool
 }

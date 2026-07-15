@@ -8,6 +8,7 @@ import {
   Check,
   CheckCircle2,
   ClipboardList,
+  Factory,
   FileText,
   Package,
   ShieldAlert,
@@ -64,6 +65,9 @@ const getNotificationIcon = (notification: Notification) => {
   if (notification.type === "spare_part_usage") {
     return <Package className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
   }
+  if (notification.type === "operational_stop") {
+    return <Factory className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+  }
   if (notification.severity === "critical") {
     return <ShieldAlert className="h-4 w-4 text-red-600 dark:text-red-400" />
   }
@@ -113,6 +117,14 @@ export function NotificationBadge() {
 
     if (notification.type === "form_submission" && notification.refId) {
       router.push(`/dashboard/forms?tab=maintenance-requests&selectedRequestId=${notification.refId}`)
+    }
+
+    if (notification.type === "operational_stop") {
+      router.push(
+        notification.refId
+          ? `/dashboard/forms/paradas-operativas?registroId=${notification.refId}`
+          : "/dashboard/forms/paradas-operativas",
+      )
     }
   }
 

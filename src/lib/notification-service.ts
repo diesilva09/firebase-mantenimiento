@@ -4,7 +4,7 @@ import webpush from "web-push"
 interface NotificationPayload {
   titulo: string
   mensaje: string
-  tipo: "task_alert" | "form_submission" | "system" | "spare_part_usage"
+  tipo: "task_alert" | "form_submission" | "system" | "spare_part_usage" | "operational_stop"
   severidad: "info" | "warning" | "critical"
   ref_task_id?: number
   estado_tarea?: "Pendiente" | "Completada" | "Futura"
@@ -72,6 +72,10 @@ function buildNotificationUrl(notification: StoredNotification) {
       return notification.ref_task_id
         ? `/dashboard/usos-repuestos?selectedUsageId=${notification.ref_task_id}`
         : "/dashboard/usos-repuestos"
+    case "operational_stop":
+      return notification.ref_task_id
+        ? `/dashboard/forms/paradas-operativas?registroId=${notification.ref_task_id}`
+        : "/dashboard/forms/paradas-operativas"
     default:
       return "/dashboard"
   }
@@ -199,7 +203,7 @@ export async function createNotification(payload: NotificationPayload) {
     )
 
     const createdNotification = result.rows[0] as StoredNotification
-    await sendPushNotification(createdNotification)
+    void sendPushNotification(createdNotification)
 
     return createdNotification
   } catch (e) {

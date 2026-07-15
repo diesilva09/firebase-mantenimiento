@@ -42,6 +42,12 @@ import { cn } from "@/lib/utils"
 import type { Task, User, Schedule, Priority } from "@/lib/types"
 import { useToast } from "@/hooks/use-toast"
 import { useFormPersistence } from "@/hooks/use-form-persistence"
+import {
+  technicians,
+  PERSONAL_EXTERNO_VALUE,
+  OTRO_TECNICO_VALUE,
+  resolveTechnicianName,
+} from "@/lib/technicians"
 
 const taskSchema = z
   .object({
@@ -71,7 +77,7 @@ const taskSchema = z
   })
   .refine(
     (data) => (
-      data.assignedTo === 'otro' || data.assignedTo === 'personal-externo'
+      data.assignedTo === OTRO_TECNICO_VALUE || data.assignedTo === PERSONAL_EXTERNO_VALUE
         ? Boolean(data.customAssignedTo?.trim())
         : true
     ),
@@ -87,14 +93,13 @@ interface EditTaskDialogProps {
   isOpen: boolean
   setIsOpen: (isOpen: boolean) => void
   task: Task | null
-  users: User[]
   onEditTask: (task: Task) => void
 }
 
 type EquipmentLookup = { codigo: string; nombre: string; area?: string | null }
 type ZonaLookup = { id: string; codigo: string | null; nombre: string; area: string | null; tipo: string }
 
-export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: EditTaskDialogProps) {
+export function EditTaskDialog({ isOpen, setIsOpen, task, onEditTask }: EditTaskDialogProps) {
   const { toast } = useToast()
   const [equipos, setEquipos] = useState<EquipmentLookup[]>([])
   const [zonas, setZonas] = useState<ZonaLookup[]>([])
@@ -183,13 +188,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
       // Objetivo: si es uno de la lista fija, dejarlo seleccionado; usar "Personal Externo"
       // cuando el nombre venga como "Personal Externo - X"; y solo usar "otro" cuando
       // realmente es un responsable personalizado genérico.
-      const fixedTechnicians: { id: string; name: string }[] = [
-        { id: 'luis-bohorquez', name: 'Luis Bohorquez' },
-        { id: 'duvan-guevara', name: 'Duvan Guevara' },
-        { id: 'juan-david-caro', name: 'Juan David Caro' },
-        { id: 'sergio-rubiano', name: 'Sergio Rubiano' },
-        { id: 'javier-morales', name: 'Javier Morales' },
-      ]
+      const fixedTechnicians = technicians.map((t) => ({ id: t.id, name: t.name }))
 
       const currentId = (task.assignedTo.id || '').trim()
       const currentName = (task.assignedTo.name || '').trim()
@@ -222,7 +221,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
 
       if (isPersonalExterno) {
         // Responsable externo: dejar seleccionado "Personal Externo" y en el input solo el nombre base
-        assignedToValue = 'personal-externo'
+        assignedToValue = PERSONAL_EXTERNO_VALUE
         const baseName = currentName.slice('Personal Externo - '.length).trim()
         customAssignedToValue = baseName
       } else if (matchFijo) {
@@ -231,7 +230,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
         customAssignedToValue = ''
       } else {
         // No coincide con ninguno de la lista: tratar como "Otro técnico"
-        assignedToValue = 'otro'
+        assignedToValue = OTRO_TECNICO_VALUE
         customAssignedToValue = currentName
       }
 
@@ -311,15 +310,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
           }
         }
 
-        const responsableNombre = (() => {
-          if (data.assignedTo === 'personal-externo' && data.customAssignedTo) {
-            return `Personal Externo - ${data.customAssignedTo}`
-          }
-          if (data.assignedTo === 'otro') {
-            return data.customAssignedTo
-          }
-          return data.assignedTo
-        })()
+        const responsableNombre = resolveTechnicianName(data.assignedTo, data.customAssignedTo)
 
         const tareaData = {
           id: task.id,
@@ -352,15 +343,15 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
           throw new Error(errorData.error || 'Error al actualizar en la BD')
         }
 
-        let assignedToUser = users.find((u) => u.id === data.assignedTo)
-        if (data.assignedTo === 'otro' && data.customAssignedTo) {
+        let assignedToUser = technicians.find((u) => u.id === data.assignedTo)
+        if (data.assignedTo === OTRO_TECNICO_VALUE && data.customAssignedTo) {
           const name = data.customAssignedTo.trim()
           assignedToUser = {
             id: `custom-${Date.now()}`,
             name,
             avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`,
           }
-        } else if (data.assignedTo === 'personal-externo' && data.customAssignedTo) {
+        } else if (data.assignedTo === PERSONAL_EXTERNO_VALUE && data.customAssignedTo) {
           const baseName = data.customAssignedTo.trim()
           const name = `Personal Externo - ${baseName}`
           assignedToUser = {
@@ -399,7 +390,7 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
         console.error('Error actualizando tarea:', error)
       }
     },
-    [task, users, onEditTask, setIsOpen, equipos, zonas, toast],
+    [task, onEditTask, setIsOpen, equipos, zonas, toast],
   )
 
   if (!task) {
@@ -686,20 +677,18 @@ export function EditTaskDialog({ isOpen, setIsOpen, task, users, onEditTask }: E
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="luis-bohorquez">Luis Bohorquez</SelectItem>
-                        <SelectItem value="duvan-guevara">Duvan Guevara</SelectItem>
-                        <SelectItem value="juan-david-caro">Juan David Caro</SelectItem>
-                        <SelectItem value="sergio-rubiano">Sergio Rubiano</SelectItem>
-                        <SelectItem value="javier-morales">Javier Morales</SelectItem>
-                        <SelectItem value="personal-externo">Personal Externo</SelectItem>
-                        <SelectItem value="otro">Otro técnico</SelectItem>
+                        {technicians.map((tech) => (
+                          <SelectItem key={tech.id} value={tech.id}>{tech.name}</SelectItem>
+                        ))}
+                        <SelectItem value={PERSONAL_EXTERNO_VALUE}>Personal Externo</SelectItem>
+                        <SelectItem value={OTRO_TECNICO_VALUE}>Otro técnico</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-              {(form.watch("assignedTo") === 'otro' || form.watch("assignedTo") === 'personal-externo') && (
+              {(form.watch("assignedTo") === OTRO_TECNICO_VALUE || form.watch("assignedTo") === PERSONAL_EXTERNO_VALUE) && (
                 <FormField
                   control={form.control}
                   name="customAssignedTo"

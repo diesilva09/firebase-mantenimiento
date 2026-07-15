@@ -23,6 +23,8 @@ import { DashboardHeader } from "@/components/dashboard-header"
 import { Logo } from "@/components/icons"
 import { useUser } from "@/firebase/auth/use-user"
 import { Box } from "lucide-react"
+import { useOfflineNotice } from "@/hooks/use-offline-notice"
+import { SectionErrorBoundary } from "@/components/section-error-boundary"
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -32,6 +34,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = React.useState(true)
   const { userRole, roleLoading } = useUserRole()
   const [redirected, setRedirected] = React.useState(false)
+  useOfflineNotice()
 
   React.useEffect(() => {
     if (!userLoading && !user) {
@@ -141,7 +144,9 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
           <GlobalSearchSuggestions />
           <DashboardHeader />
           <main className="p-4 sm:p-6 lg:p-8">
-            {children}
+            <SectionErrorBoundary title="Error en esta sección del panel">
+              {children}
+            </SectionErrorBoundary>
           </main>
         </DashboardSearchProvider>
       </SidebarInset>

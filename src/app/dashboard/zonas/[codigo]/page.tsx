@@ -4,7 +4,7 @@ import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Eye, Trash2, Folder } from "lucide-react";
+import { ArrowLeft, Eye, Trash2, Folder, FileText } from "lucide-react";
 import { MultiFileSection, MultiFileViewer } from "@/components/multi-file-viewer";
 import { MultiFileUploader } from "@/components/multi-file-uploader";
 import { useUser } from "@/firebase/auth/use-user";
@@ -19,6 +19,7 @@ import {
 import { emitLiveUpdate, useLiveRefresh } from "@/hooks/use-live-refresh";
 import { useToast } from "@/hooks/use-toast";
 import { getDisplayFileName, getStoredFileId } from "@/lib/file-display";
+import { Label } from "@/components/ui/label";
 
 interface ZonaHistorialRow {
   id: number;
@@ -73,7 +74,6 @@ export default function ZonaDetallePage() {
 
   const [rows, setRows] = useState<ZonaHistorialRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const [attachmentsUrl, setAttachmentsUrl] = useState<string>("");
   const [zonaRecord, setZonaRecord] = useState<ZonaApiRow | null>(null);
   const [loadingAttachments, setLoadingAttachments] = useState(false);
@@ -94,6 +94,10 @@ export default function ZonaDetallePage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Modal de detalles de la hoja de vida
+  const [selectedRow, setSelectedRow] = useState<ZonaHistorialRow | null>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
   const loadAttachmentsUrl = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
@@ -607,9 +611,15 @@ export default function ZonaDetallePage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredRows.map((row, idx) => (
-                    <React.Fragment key={`zhv-${row.id}`}>
-                      <tr className="border-t">
+                   filteredRows.map((row, idx) => (
+                    <tr
+                      key={`zhv-${row.id}`}
+                      className="border-t cursor-pointer hover:bg-muted/40 transition-colors"
+                      onClick={() => {
+                        setSelectedRow(row);
+                        setIsDetailModalOpen(true);
+                      }}
+                    >
                         <td className="px-2 py-1 sm:px-3 sm:py-2 align-top whitespace-nowrap">
                           {row.fecha}
                         </td>
@@ -649,9 +659,11 @@ export default function ZonaDetallePage() {
                               size="icon"
                               variant="ghost"
                               className="h-7 w-7"
-                              onClick={() =>
-                                setExpandedIndex((prev) => (prev === idx ? null : idx))
-                              }
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedRow(row);
+                                setIsDetailModalOpen(true);
+                              }}
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
@@ -661,52 +673,17 @@ export default function ZonaDetallePage() {
                                 size="icon"
                                 variant="ghost"
                                 className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                onClick={() => openDeleteDialog(row.id)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openDeleteDialog(row.id);
+                                }}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             )}
                           </div>
                         </td>
-                      </tr>
-                      {expandedIndex === idx && (
-                        <tr className="border-t bg-muted/30">
-                          <td colSpan={7} className="px-2 py-3 sm:px-3">
-                            <div className="grid gap-2 text-[11px] sm:text-xs sm:grid-cols-2">
-                              <div className="flex gap-2">
-                                <span className="font-medium text-muted-foreground shrink-0">
-                                  Descripción:
-                                </span>
-                                <span className="whitespace-pre-wrap break-all">
-                                  {row.descripcion || "-"}
-                                </span>
-                              </div>
-                              <div className="flex gap-2">
-                                <span className="font-medium text-muted-foreground shrink-0">
-                                  Repuestos usados:
-                                </span>
-                                <span className="whitespace-pre-wrap break-all">
-                                  {row.repuestos || "-"}
-                                </span>
-                              </div>
-                              <div className="flex gap-2 sm:col-span-2">
-                                <span className="font-medium text-muted-foreground shrink-0">
-                                  Observaciones:
-                                </span>
-                                <span className="whitespace-pre-wrap break-all">
-                                  {row.observaciones || "-"}
-                                </span>
-                              </div>
-                              <MultiFileSection
-                                imagenAntesUrl={row.imagenAntesUrl}
-                                imagenDespuesUrl={row.imagenDespuesUrl}
-                                anexoUrl={row.anexoUrl}
-                              />
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
+                    </tr>
                   ))
                 )}
               </tbody>
@@ -823,6 +800,88 @@ export default function ZonaDetallePage() {
           </div>
         </div>
       )}
+      {/* Modal de detalles del registro de hoja de vida */}
+      <Dialog open={isDetailModalOpen} onOpenChange={(open) => {
+        setIsDetailModalOpen(open);
+        if (!open) setSelectedRow(null);
+      }}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-blue-600" />
+              Detalle del Registro de Hoja de Vida
+            </DialogTitle>
+          </DialogHeader>
+          {selectedRow && (
+            <div className="space-y-4 py-4">
+              {/* Fecha y Tipo */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Fecha</Label>
+                  <p className="font-medium">{selectedRow.fecha}</p>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Tipo de Mantenimiento</Label>
+                  <p className="font-medium">
+                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                      selectedRow.tipo === 'Correctivo' ? 'bg-red-100 text-red-700' :
+                      selectedRow.tipo === 'Preventivo' ? 'bg-blue-100 text-blue-700' :
+                      selectedRow.tipo === 'Rutinario' ? 'bg-amber-100 text-amber-700' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>
+                      {selectedRow.tipo || 'No especificado'}
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Responsable */}
+              <div className="space-y-1">
+                <Label className="text-muted-foreground text-xs">Responsable / Ejecutado por</Label>
+                <p className="font-medium">{selectedRow.responsable || '-'}</p>
+              </div>
+
+              {/* Descripción del trabajo */}
+              <div className="space-y-1">
+                <Label className="text-muted-foreground text-xs">Descripción del Trabajo</Label>
+                <div className="bg-muted/50 p-3 rounded-md">
+                  <p className="whitespace-pre-wrap text-sm">{selectedRow.descripcion || '-'}</p>
+                </div>
+              </div>
+
+              {/* Repuestos usados */}
+              <div className="space-y-1">
+                <Label className="text-muted-foreground text-xs">Repuestos o Materiales Usados</Label>
+                <div className="bg-muted/50 p-3 rounded-md">
+                  <p className="whitespace-pre-wrap text-sm">{selectedRow.repuestos || '-'}</p>
+                </div>
+              </div>
+
+              {/* Observaciones */}
+              {selectedRow.observaciones && (
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Observaciones</Label>
+                  <div className="bg-muted/50 p-3 rounded-md">
+                    <p className="whitespace-pre-wrap text-sm">{selectedRow.observaciones}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Evidencia fotográfica y anexos */}
+              <MultiFileSection
+                imagenAntesUrl={selectedRow.imagenAntesUrl}
+                imagenDespuesUrl={selectedRow.imagenDespuesUrl}
+                anexoUrl={selectedRow.anexoUrl}
+              />
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDetailModalOpen(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Diálogo de confirmación de eliminación */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

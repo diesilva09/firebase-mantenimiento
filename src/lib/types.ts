@@ -20,6 +20,7 @@ export type Task = {
   assignedTo: User;
   executedBy?: User; // Optional user who executed the task
   nextExecution: string; // ISO date string
+  createdAt?: string; // ISO date string (creado_en en BD)
   status: TaskStatus;
   hasAlert: boolean;
   workDone?: string;
@@ -49,7 +50,7 @@ export type Submission = {
   data: Record<string, any>;
 };
  
-export type NotificationType = 'task_alert' | 'form_submission' | 'system' | 'spare_part_usage';
+export type NotificationType = 'task_alert' | 'form_submission' | 'system' | 'spare_part_usage' | 'operational_stop';
 export type NotificationSeverity = 'info' | 'warning' | 'critical';
 export type Notification = {
   id: string;

@@ -67,8 +67,10 @@ export default function DynamicFormPage() {
     )
   }
 
+  const isWideForm = slug === "paradas-operativas"
+
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className={isWideForm ? "mx-auto w-full max-w-7xl px-2 sm:px-4" : "mx-auto max-w-4xl"}>
         <div className="mb-6">
             <Button asChild variant="outline" size="sm">
                 <Link href="/dashboard/forms">
@@ -77,12 +79,12 @@ export default function DynamicFormPage() {
                 </Link>
             </Button>
         </div>
-      <Card>
-        <CardHeader>
+      <Card className={isWideForm ? "shadow-sm" : undefined}>
+        <CardHeader className={isWideForm ? "pb-4" : undefined}>
           <CardTitle className="text-2xl">{formInfo.title}</CardTitle>
           <CardDescription>{formInfo.description}</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className={isWideForm ? "px-4 pb-8 sm:px-8" : undefined}>
           <FormComponent />
         </CardContent>
       </Card>

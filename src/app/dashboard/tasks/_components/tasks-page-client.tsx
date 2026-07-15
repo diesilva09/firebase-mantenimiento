@@ -17,7 +17,7 @@ import { CompleteTaskDialog } from './complete-task-dialog';
 import { EquipmentInfoDialog } from './equipment-info-dialog';
 import type { Task, User, Schedule, Notification } from '@/lib/types';
 import { Card, CardContent } from '@/components/ui/card';
-import { mapDatabaseTaskToFrontend, fetchTasksFromDB, completeTaskInDB, deleteTaskInDB } from '@/lib/task-utils';
+import { mapDatabaseTaskToFrontend, fetchTasksFromDB, completeTaskInDB, deleteTaskInDB, sortTasksByRecency } from '@/lib/task-utils';
 import { useToast } from '@/hooks/use-toast';
 import { useUser } from '@/firebase/auth/use-user';
 import { useNotificationsContext as useNotifications } from '@/context/notifications-context';
@@ -32,16 +32,16 @@ import { exportToExcel, exportToPDF, exportToWord } from "@/lib/export-utils"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { emitLiveUpdate, useLiveRefresh } from '@/hooks/use-live-refresh';
+import { getOperationErrorMessage } from '@/lib/toast-utils';
 
 type ViewMode = 'calendar' | 'table' | 'analytics';
 const schedules: Schedule[] = ['Partes Altas', 'Equipo de Medición', 'Mantenimiento Locativo', 'Maquinaria'];
 
 interface TasksPageClientProps {
   initialTasks: Task[];
-  users: User[];
 }
 
-export default function TasksPageClient({ initialTasks, users }: TasksPageClientProps) {
+export default function TasksPageClient({ initialTasks }: TasksPageClientProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const selectedTaskId = searchParams.get("selectedTaskId");
@@ -113,12 +113,12 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
 
     try {
       const dbTasks = await fetchTasksFromDB(undefined, userEmail);
-      const mappedTasks = dbTasks.map(dbTask => mapDatabaseTaskToFrontend(dbTask, users));
+      const mappedTasks = dbTasks.map(dbTask => mapDatabaseTaskToFrontend(dbTask));
       setAllTasksForSearch(mappedTasks);
     } catch (error) {
       console.error('Error loading all tasks for search:', error);
     }
-  }, [userEmail, users]);
+  }, [userEmail]);
 
   useEffect(() => {
     void loadAllTasks();
@@ -229,19 +229,19 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
 
     try {
       const dbTasks = await fetchTasksFromDB(schedule, userEmail);
-      const mappedTasks = dbTasks.map(dbTask => mapDatabaseTaskToFrontend(dbTask, users));
+      const mappedTasks = dbTasks.map(dbTask => mapDatabaseTaskToFrontend(dbTask));
       setTasks(mappedTasks);
     } catch (error) {
       console.error('Error loading tasks:', error);
       if (!options?.silent) {
-        toast({ title: "Error", description: "No se pudieron cargar las tareas", variant: "destructive" });
+        toast({ ...getOperationErrorMessage(error, 'No se pudieron cargar las tareas'), variant: "destructive" });
       }
     } finally {
       if (!options?.silent) {
         setIsLoading(false);
       }
     }
-  }, [toast, userEmail, users]);
+  }, [toast, userEmail]);
 
   useEffect(() => {
     if (!userEmail) return;
@@ -309,13 +309,14 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         toast({
           title: "Tarea eliminada",
           description: "La tarea se ha eliminado correctamente.",
+          variant: "success",
         });
       } else {
         throw new Error('Error al eliminar en la BD');
       }
     } catch (error) {
       console.error('Error deleting task:', error);
-      toast({ title: "Error", description: "No se pudo eliminar la tarea", variant: "destructive" });
+      toast({ ...getOperationErrorMessage(error, 'No se pudo eliminar la tarea'), variant: "destructive" });
     }
   };
 
@@ -365,9 +366,11 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
       toast({
         title: "Tarea agregada",
         description: "La tarea se ha guardado correctamente",
+        variant: "success",
       });
     } catch (error) {
       console.error('Error refreshing tasks after add:', error);
+      toast({ ...getOperationErrorMessage(error, 'No se pudo guardar la tarea'), variant: "destructive" });
     }
   };
 
@@ -382,6 +385,7 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
     toast({
       title: "Tarea actualizada",
       description: `La tarea ${updatedTask.code} se ha actualizado correctamente.`,
+      variant: "success",
     });
     setIsEditTaskOpen(false);
     setSelectedTask(null);
@@ -439,7 +443,7 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         
         // Find the updated task from the fresh list
         const updatedTasks = await fetchTasksFromDB(selectedSchedule, userEmail);
-        const mappedUpdatedTasks = updatedTasks.map(dbTask => mapDatabaseTaskToFrontend(dbTask, users));
+        const mappedUpdatedTasks = updatedTasks.map(dbTask => mapDatabaseTaskToFrontend(dbTask));
         let baseTask = mappedUpdatedTasks.find(t => t.id === taskId) || null;
 
         if (baseTask) {
@@ -561,6 +565,7 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         toast({
           title: "Tarea completada",
           description: `La tarea ${selectedTask?.code} ha sido marcada como completada.`,
+          variant: "success",
         });
         emitLiveUpdate(["tasks", "notifications"]);
         setIsCompleteOpen(false);
@@ -571,7 +576,7 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
       }
     } catch (error) {
       console.error('Error completing task:', error);
-      toast({ title: "Error", description: "No se pudo completar la tarea", variant: "destructive" });
+      toast({ ...getOperationErrorMessage(error, 'No se pudo completar la tarea'), variant: "destructive" });
       return false;
     }
   };
@@ -603,11 +608,7 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
     return grouped;
   }, [visibleTasks]);
 
-  const sortedTasks = useMemo(() => {
-    return [...visibleTasks].sort((a, b) =>
-      new Date(a.nextExecution).getTime() - new Date(b.nextExecution).getTime()
-    );
-  }, [visibleTasks]);
+  const sortedTasks = useMemo(() => sortTasksByRecency(visibleTasks), [visibleTasks]);
 
   const handleExport = (exportFormat: 'excel' | 'pdf' | 'word') => {
     const dataToExport = visibleTasks.map(t => ({
@@ -745,7 +746,6 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
       ) : (
         <TaskTableView
           tasks={sortedTasks}
-          users={users}
           isAdmin={isAdmin}
           onOpenComplete={handleOpenComplete}
           onOpenEdit={handleOpenEdit}
@@ -758,7 +758,7 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
         />
       )}
 
-      <AddTaskDialog isOpen={isAddTaskOpen} setIsOpen={setIsAddTaskOpen} onAddTask={handleAddTask} users={users} />
+      <AddTaskDialog isOpen={isAddTaskOpen} setIsOpen={setIsAddTaskOpen} onAddTask={handleAddTask} />
 
       {selectedTask && (
         <>
@@ -775,14 +775,12 @@ export default function TasksPageClient({ initialTasks, users }: TasksPageClient
             isOpen={isEditTaskOpen}
             setIsOpen={setIsEditTaskOpen}
             task={selectedTask}
-            users={users}
             onEditTask={handleEditTask}
           />
           <CompleteTaskDialog
             isOpen={isCompleteOpen}
             setIsOpen={setIsCompleteOpen}
             task={selectedTask}
-            users={users}
             onComplete={handleCompleteTask}
           />
           <EquipmentInfoDialog

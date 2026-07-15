@@ -1,15 +1,9 @@
 import { User, Task, FormMetadata, Submission, FormSlug } from './types';
 import { subDays, addDays, formatISO } from 'date-fns';
+import { technicians } from './technicians';
 
-export const users: User[] = [
-  { id: 'tech-1', name: 'Luis Bohorquez', avatarUrl: 'https://picsum.photos/seed/tech1/40/40' },
-  { id: 'tech-2', name: 'Duvan Guevara', avatarUrl: 'https://picsum.photos/seed/tech2/40/40' },
-  { id: 'tech-3', name: 'Juan David Caro', avatarUrl: 'https://picsum.photos/seed/tech3/40/40' },
-  { id: 'tech-4', name: 'Sergio Rubiano', avatarUrl: 'https://picsum.photos/seed/tech4/40/40' },
-  { id: 'tech-5', name: 'Javier Morales', avatarUrl: 'https://picsum.photos/seed/tech5/40/40' },
-  { id: 'tech-6', name: 'Andres', avatarUrl: 'https://picsum.photos/seed/tech6/40/40' },
-  { id: 'tech-7', name: 'Robayo', avatarUrl: 'https://picsum.photos/seed/tech7/40/40' },
-];
+/** Alias de compatibilidad: siempre apunta a `technicians`. No definir listas aparte. */
+export const users: User[] = technicians;
 
 const today = new Date();
 
@@ -116,7 +110,7 @@ export const tasks: Task[] = [
 export const forms: FormMetadata[] = [
     { slug: 'inspeccion-equipos', title: 'Inspección de Equipos', description: 'Registro de inspecciones de rutina y estado de equipos.' },
     { slug: 'orden-mantenimiento', title: 'Orden de Mantenimiento', description: 'Generación de órdenes de trabajo para tareas correctivas.' },
-    { slug: 'paradas-operativas', title: 'Paradas Operativas en Máquina', description: 'Registro de paradas no planificadas y su impacto.' },
+    { slug: 'paradas-operativas', title: 'Paradas Operativas', description: 'Apertura de línea, registro incremental de paradas y cierre de producción.' },
     { slug: 'consumo-diario', title: 'Consumo Diario de Servicio', description: 'Control de consumo de energía, agua y gas.' },
     
     { slug: 'solicitud-repuestos', title: 'Solicitud de Repuestos', description: 'Sistema para solicitar y gestionar repuestos necesarios.' },

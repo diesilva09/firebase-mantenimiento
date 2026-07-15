@@ -820,6 +820,20 @@ export function MaintenanceOrderForm() {
 
         <FormField
           control={form.control}
+          name="fecha"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Fecha</FormLabel>
+              <FormControl>
+                <Input type="date" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
           name="tipoMantenimiento"
           render={({ field }) => (
             <FormItem>

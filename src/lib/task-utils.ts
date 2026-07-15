@@ -1,7 +1,29 @@
 import { Task, User } from './types';
+import { findTechnicianByIdOrName } from './technicians';
+import { isNetworkError } from './toast-utils';
+
+/** Timestamp para ordenar: completadas por fecha de cierre, resto por creación. */
+export function getTaskRecencyTimestamp(task: Task): number {
+  if (task.status === 'Completada' && task.completionDate) {
+    return new Date(task.completionDate).getTime();
+  }
+  if (task.createdAt) {
+    return new Date(task.createdAt).getTime();
+  }
+  const idNum = parseInt(task.id, 10);
+  if (!Number.isNaN(idNum)) return idNum;
+  return new Date(task.nextExecution).getTime();
+}
+
+/** Más recientes primero (arriba en el cronograma). */
+export function sortTasksByRecency(tasks: Task[]): Task[] {
+  return [...tasks].sort(
+    (a, b) => getTaskRecencyTimestamp(b) - getTaskRecencyTimestamp(a),
+  );
+}
 
 // Función para mapear tareas de la base de datos al formato del frontend
-export function mapDatabaseTaskToFrontend(dbTask: any, users: User[]): Task {
+export function mapDatabaseTaskToFrontend(dbTask: any): Task {
   // Determinar el estado basado en la fecha y el estado de la BD
   let status: Task['status'] = 'Pendiente';
   const today = new Date();
@@ -13,11 +35,9 @@ export function mapDatabaseTaskToFrontend(dbTask: any, users: User[]): Task {
     status = 'Futura';
   }
 
-  // Buscar usuario responsable
-  const assignedTo = users.find(user =>
-    user.name.toLowerCase().includes(dbTask.responsable.toLowerCase()) ||
-    dbTask.responsable.toLowerCase().includes(user.name.toLowerCase())
-  ) || {
+  // Buscar usuario responsable (lista fija de técnicos de la plataforma)
+  const matchedResponsible = findTechnicianByIdOrName(dbTask.responsable || '');
+  const assignedTo = matchedResponsible || {
     id: `custom-${dbTask.id}`,
     name: dbTask.responsable,
     avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(dbTask.responsable)}/40/40`
@@ -27,10 +47,7 @@ export function mapDatabaseTaskToFrontend(dbTask: any, users: User[]): Task {
   let executedBy = undefined;
   if (dbTask.ejecutado_por) {
     const name = dbTask.ejecutado_por as string;
-    executedBy = users.find(user =>
-      user.name.toLowerCase().includes(name.toLowerCase()) ||
-      name.toLowerCase().includes(user.name.toLowerCase())
-    ) || {
+    executedBy = findTechnicianByIdOrName(name) || {
       id: `executed-${dbTask.id}`,
       name,
       avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`
@@ -48,6 +65,9 @@ export function mapDatabaseTaskToFrontend(dbTask: any, users: User[]): Task {
     assignedTo,
     executedBy,
     nextExecution: dbTask.fecha_programada,
+    createdAt: dbTask.creado_en
+      ? new Date(dbTask.creado_en).toISOString()
+      : undefined,
     completionDate: dbTask.fecha_completada,
     hasAlert: dbTask.tiene_alerta || false,
     workDone: dbTask.trabajo_realizado,
@@ -134,9 +154,14 @@ export async function completeTaskInDB(
       })
     });
 
-    return response.ok;
+    if (!response.ok) {
+      throw new Error(`Error al completar la tarea (${response.status})`);
+    }
+
+    return true;
   } catch (error) {
     console.error('Error completing task:', error);
+    if (isNetworkError(error)) throw error;
     return false;
   }
 }
@@ -172,9 +197,14 @@ export async function deleteTaskInDB(taskId: string): Promise<boolean> {
       return true;
     }
 
+    if (!response.ok) {
+      throw new Error(`Error al eliminar la tarea (${response.status})`);
+    }
+
     return response.ok;
   } catch (error) {
     console.error('Error deleting task:', error);
+    if (isNetworkError(error)) throw error;
     return false;
   }
 }

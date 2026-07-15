@@ -46,6 +46,8 @@ import { useNotificationsContext as useNotifications } from "@/context/notificat
 import { scheduleTaskReminders } from "../../../../services/task-reminders"
 import { useToast } from "@/hooks/use-toast"
 import { useFormPersistence } from "@/hooks/use-form-persistence"
+import { getOperationErrorMessage } from "@/lib/toast-utils"
+import { technicians, PERSONAL_EXTERNO_VALUE, OTRO_TECNICO_VALUE, resolveTechnicianName } from "@/lib/technicians"
 
 const taskSchema = z
   .object({
@@ -78,7 +80,7 @@ const taskSchema = z
   })
   .refine(
     (data) => (
-      data.assignedTo === 'otro' || data.assignedTo === 'personal-externo'
+      data.assignedTo === OTRO_TECNICO_VALUE || data.assignedTo === PERSONAL_EXTERNO_VALUE
         ? Boolean(data.customAssignedTo?.trim())
         : true
     ),
@@ -107,13 +109,12 @@ interface AddTaskDialogProps {
   isOpen: boolean
   setIsOpen: (isOpen: boolean) => void
   onAddTask: (task: Task) => void
-  users: User[]
 }
 
 type EquipmentLookup = { codigo: string; nombre: string; area?: string | null; linea?: string | null }
 type ZonaLookup = { id: string; codigo: string | null; nombre: string; area: string | null; tipo: string }
 
-export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDialogProps) {
+export function AddTaskDialog({ isOpen, setIsOpen, onAddTask }: AddTaskDialogProps) {
   const { addNotification, permission } = useNotifications()
   const { toast } = useToast()
   const form = useForm<TaskFormValues>({
@@ -384,16 +385,7 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
 
       // Obtener el nombre completo del responsable para la BD / notificación
       const responsableId = data.assignedTo;
-      let responsableName = '';
-      if (responsableId === 'personal-externo') {
-        const baseName = data.customAssignedTo?.trim() || '';
-        responsableName = baseName ? `Personal Externo - ${baseName}` : 'Personal Externo';
-      } else if (responsableId === 'otro') {
-        responsableName = data.customAssignedTo?.trim() || '';
-      } else {
-        const user = users.find(u => u.id === responsableId);
-        responsableName = user ? user.name : responsableId;
-      }
+      const responsableName = resolveTechnicianName(responsableId, data.customAssignedTo);
 
       const tareaData = {
         codigo_equipo: codigoEquipoForDB,
@@ -435,7 +427,11 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
           code: data.code,
           schedule: data.schedule,
           priority: data.priority,
-          assignedTo: users.find(u => u.id === data.assignedTo) || { id: 'unknown', name: 'Unknown', avatarUrl: '' },
+          assignedTo: technicians.find(u => u.id === data.assignedTo) || {
+            id: data.assignedTo,
+            name: responsableName,
+            avatarUrl: '',
+          },
           nextExecution: data.nextExecution.toISOString(),
           hasAlert: data.hasAlert,
           status: 'Pendiente'
@@ -451,15 +447,15 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
         );
       }
 
-      let assignedToUser = users.find(u => u.id === data.assignedTo)
-      if (data.assignedTo === 'otro' && data.customAssignedTo) {
+      let assignedToUser = technicians.find(u => u.id === data.assignedTo)
+      if (data.assignedTo === OTRO_TECNICO_VALUE && data.customAssignedTo) {
         const name = data.customAssignedTo.trim()
         assignedToUser = {
           id: `custom-${Date.now()}`,
           name,
           avatarUrl: `https://picsum.photos/seed/${encodeURIComponent(name)}/40/40`,
         }
-      } else if (data.assignedTo === 'personal-externo' && data.customAssignedTo) {
+      } else if (data.assignedTo === PERSONAL_EXTERNO_VALUE && data.customAssignedTo) {
         const baseName = data.customAssignedTo.trim()
         const name = `Personal Externo - ${baseName}`
         assignedToUser = {
@@ -499,8 +495,8 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
     } catch (error) {
       console.error('Error guardando tarea:', error);
       toast({
+        ...getOperationErrorMessage(error, 'Ocurrió un error al crear la tarea'),
         title: "Error al crear la tarea",
-        description: error instanceof Error ? error.message : "Ocurrió un error al crear la tarea",
         variant: "destructive",
       });
     }
@@ -992,22 +988,18 @@ export function AddTaskDialog({ isOpen, setIsOpen, onAddTask, users }: AddTaskDi
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="luis bohorquez">Luis Bohorquez</SelectItem>
-                        <SelectItem value="duvan guevara">Duvan Guevara</SelectItem>
-                        <SelectItem value="juan david caro">Juan David Caro</SelectItem>
-                        <SelectItem value="sergio rubiano">Sergio Rubiano</SelectItem>
-                        <SelectItem value="javier morales">Javier Morales</SelectItem>
-                        <SelectItem value="Andres">Andres </SelectItem>
-                        <SelectItem value="Robayo">Robayo</SelectItem>
-                        <SelectItem value="personal-externo">Personal Externo</SelectItem>
-                        <SelectItem value="otro">Otro técnico</SelectItem>
+                        {technicians.map((tech) => (
+                          <SelectItem key={tech.id} value={tech.id}>{tech.name}</SelectItem>
+                        ))}
+                        <SelectItem value={PERSONAL_EXTERNO_VALUE}>Personal Externo</SelectItem>
+                        <SelectItem value={OTRO_TECNICO_VALUE}>Otro técnico</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage/>
                   </FormItem>
                 )}
               />
-              {(form.watch("assignedTo") === 'otro' || form.watch("assignedTo") === 'personal-externo') && (
+              {(form.watch("assignedTo") === OTRO_TECNICO_VALUE || form.watch("assignedTo") === PERSONAL_EXTERNO_VALUE) && (
                 <FormField
                   control={form.control}
                   name="customAssignedTo"

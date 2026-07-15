@@ -191,7 +191,9 @@ export async function GET(req: Request) {
       `SELECT tc.*, e.nombre as equipo_nombre
        FROM tareas_cronograma tc
        LEFT JOIN equipos e ON tc.codigo_equipo = e.codigo
-       ORDER BY tc.fecha_programada DESC`,
+       ORDER BY
+         CASE WHEN tc.estado = 'completada' THEN tc.fecha_completada ELSE tc.creado_en END DESC NULLS LAST,
+         tc.id DESC`,
     )
     return NextResponse.json({ data: rows })
   } catch (err) {

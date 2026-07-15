@@ -14,6 +14,16 @@ async function getZonasHistorialColumns() {
   return new Set(rows.map((row: { column_name: string }) => String(row.column_name)));
 }
 
+async function ensureZonasHistorialSchema() {
+  try {
+    await query(`ALTER TABLE zonas_historial ADD COLUMN IF NOT EXISTS es_solicitada BOOLEAN DEFAULT false`);
+    await query(`ALTER TABLE zonas_historial ADD COLUMN IF NOT EXISTS solicitud_id INTEGER`);
+    await query(`ALTER TABLE zonas_historial ADD COLUMN IF NOT EXISTS origen_orden TEXT`);
+  } catch (error) {
+    console.warn("No se pudo autoajustar el esquema de zonas_historial:", error);
+  }
+}
+
 // POST /api/zonas/historial
 // Crea un registro de hoja de vida en la tabla zonas_historial
 export async function POST(req: Request) {
@@ -22,6 +32,7 @@ export async function POST(req: Request) {
   }
 
   try {
+    await ensureZonasHistorialSchema();
     const availableColumns = await getZonasHistorialColumns();
     const body = await req.json();
 
@@ -103,6 +114,7 @@ export async function GET(req: Request) {
   }
 
   try {
+    await ensureZonasHistorialSchema();
     const availableColumns = await getZonasHistorialColumns();
     const { searchParams } = new URL(req.url);
     const codigoZona = searchParams.get("codigoZona");
@@ -168,6 +180,7 @@ export async function DELETE(req: Request) {
   }
 
   try {
+    await ensureZonasHistorialSchema();
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
 

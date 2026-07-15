@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { FormControl, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { users } from "@/lib/data";
+import { technicians } from "@/lib/technicians";
 import type { ControllerRenderProps } from "react-hook-form";
 
 interface TechnicianSelectFieldProps {
@@ -25,7 +25,7 @@ export function TechnicianSelectField({
 }: TechnicianSelectFieldProps) {
   // Verificar el tipo de valor actual
   const isPersonalExterno = field.value?.startsWith("Personal externo - ");
-  const isOtroTecnico = field.value && !users.some(user => user.name === field.value) && !isPersonalExterno;
+  const isOtroTecnico = field.value && !technicians.some(user => user.name === field.value) && !isPersonalExterno;
 
   const [externalName, setExternalName] = useState(() => {
     if (isPersonalExterno) return field.value.replace("Personal externo - ", "");
@@ -40,7 +40,7 @@ export function TechnicianSelectField({
   // Sincronizar estado interno cuando el valor del campo cambia externamente (ej. form.reset)
   useEffect(() => {
     const newIsPersonalExterno = field.value?.startsWith("Personal externo - ");
-    const newIsOtroTecnico = field.value && !users.some(user => user.name === field.value) && !newIsPersonalExterno;
+    const newIsOtroTecnico = field.value && !technicians.some(user => user.name === field.value) && !newIsPersonalExterno;
 
     if (newIsPersonalExterno) {
       setInputMode("personal_externo");
@@ -83,7 +83,7 @@ export function TechnicianSelectField({
     // Si es personal externo, retornar el valor especial
     if (field.value?.startsWith("Personal externo - ")) return PERSONAL_EXTERNO_VALUE;
     // Si es otro técnico (no está en la lista y no es personal externo)
-    if (!users.some((user) => user.name === field.value)) return OTRO_TECNICO_VALUE;
+    if (!technicians.some((user) => user.name === field.value)) return OTRO_TECNICO_VALUE;
     // Si es un usuario de la lista, retornar el nombre
     return field.value;
   };
@@ -103,7 +103,7 @@ export function TechnicianSelectField({
           </SelectTrigger>
         </FormControl>
         <SelectContent>
-          {users.map((user) => (
+          {technicians.map((user) => (
             <SelectItem key={user.id} value={user.name}>
               {user.name}
             </SelectItem>

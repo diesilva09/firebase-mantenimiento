@@ -22,8 +22,19 @@ const historialSchema = z.object({
   origen_orden: z.string().optional().nullable(),
 })
 
+async function ensureEquiposHistorialSchema() {
+  try {
+    await query(`ALTER TABLE equipos_historial ADD COLUMN IF NOT EXISTS es_solicitada BOOLEAN DEFAULT false`)
+    await query(`ALTER TABLE equipos_historial ADD COLUMN IF NOT EXISTS solicitud_id INTEGER`)
+    await query(`ALTER TABLE equipos_historial ADD COLUMN IF NOT EXISTS origen_orden TEXT`)
+  } catch (error) {
+    console.warn("No se pudo autoajustar el esquema de equipos_historial:", error)
+  }
+}
+
 export async function POST(req: Request) {
   try {
+    await ensureEquiposHistorialSchema()
     const body = await req.json()
 
     // Normalizar payload desde el frontend (usa camelCase)
@@ -113,6 +124,7 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   try {
+    await ensureEquiposHistorialSchema()
     const { searchParams } = new URL(req.url)
     const codigoEquipo = searchParams.get('codigoEquipo')
 
@@ -142,6 +154,7 @@ export async function GET(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
+    await ensureEquiposHistorialSchema()
     const { searchParams } = new URL(req.url)
     const id = searchParams.get('id')
 
